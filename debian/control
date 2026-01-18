@@ -1,0 +1,16 @@
+Source: ulog
+Section: utils
+Priority: optional
+Maintainer: Abu <abu@matterize.io>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.6.0
+Homepage: https://github.com/matterizelabs/ulog
+Rules-Requires-Root: no
+
+Package: ulog
+Architecture: all
+Depends: ${misc:Depends}, socat, moreutils
+Description: USB serial port logger with automatic session management
+ Logs serial data from USB devices with syslog-style timestamps.
+ Features automatic daily log rotation, new log file on service restart,
+ auto-start on device hotplug, and config changes are auto-applied.

@@ -1,0 +1,12 @@
+#!/bin/bash
+set -e
+
+if [ "$1" = "remove" ]; then
+    systemctl stop ulog.service ulog-rollover.timer ulog-genconfig.path 2>/dev/null || true
+    systemctl disable ulog.service ulog-rollover.timer ulog-genconfig.path 2>/dev/null || true
+    rm -f /etc/udev/rules.d/99-ulog.rules
+    rm -f /lib/systemd/system/ulog.service
+    udevadm control --reload-rules 2>/dev/null || true
+fi
+
+#DEBHELPER#

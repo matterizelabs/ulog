@@ -1,0 +1,14 @@
+#!/bin/bash
+set -e
+
+if [ "$1" = "configure" ]; then
+    /usr/bin/ulog-genconfig
+    systemctl daemon-reload
+    echo ""
+    echo "ulog installed."
+    echo "Enable with: systemctl enable --now ulog.service ulog-rollover.timer ulog-genconfig.path"
+    echo "Config: /etc/ulog.conf (changes auto-applied)"
+    echo ""
+fi
+
+#DEBHELPER#
