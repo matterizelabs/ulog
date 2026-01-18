@@ -9,13 +9,13 @@ echo "Installing dependencies..."
 pacman -S --needed --noconfirm socat moreutils
 
 echo "Installing ulog..."
-install -Dm755 ulog.sh /usr/bin/ulog
-install -Dm755 ulog-genconfig /usr/bin/ulog-genconfig
-install -Dm644 ulog.conf /etc/ulog.conf
-install -Dm644 ulog-genconfig.path /usr/lib/systemd/system/ulog-genconfig.path
-install -Dm644 ulog-genconfig.service /usr/lib/systemd/system/ulog-genconfig.service
-install -Dm644 ulog-rollover.service /usr/lib/systemd/system/ulog-rollover.service
-install -Dm644 ulog-rollover.timer /usr/lib/systemd/system/ulog-rollover.timer
+install -Dm755 src/ulog.sh /usr/bin/ulog
+install -Dm755 src/ulog-genconfig /usr/bin/ulog-genconfig
+install -Dm644 src/ulog.conf /etc/ulog.conf
+install -Dm644 services/ulog-genconfig.path /usr/lib/systemd/system/ulog-genconfig.path
+install -Dm644 services/ulog-genconfig.service /usr/lib/systemd/system/ulog-genconfig.service
+install -Dm644 services/ulog-rollover.service /usr/lib/systemd/system/ulog-rollover.service
+install -Dm644 services/ulog-rollover.timer /usr/lib/systemd/system/ulog-rollover.timer
 
 echo "Generating config..."
 /usr/bin/ulog-genconfig

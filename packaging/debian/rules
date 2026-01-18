@@ -1,0 +1,13 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@
+
+override_dh_install:
+	install -Dm755 src/ulog.sh debian/ulog/usr/bin/ulog
+	install -Dm755 src/ulog-genconfig debian/ulog/usr/bin/ulog-genconfig
+	install -Dm644 src/ulog.conf debian/ulog/etc/ulog.conf
+	install -Dm644 services/ulog-genconfig.path debian/ulog/lib/systemd/system/ulog-genconfig.path
+	install -Dm644 services/ulog-genconfig.service debian/ulog/lib/systemd/system/ulog-genconfig.service
+	install -Dm644 services/ulog-rollover.service debian/ulog/lib/systemd/system/ulog-rollover.service
+	install -Dm644 services/ulog-rollover.timer debian/ulog/lib/systemd/system/ulog-rollover.timer
