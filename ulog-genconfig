@@ -1,0 +1,45 @@
+#!/bin/bash
+# ulog-genconfig - regenerate udev rule and systemd service from config
+
+set -e
+
+CONFIG_FILE="${1:-/etc/ulog.conf}"
+
+if [[ ! -f "$CONFIG_FILE" ]]; then
+    echo "Config not found: $CONFIG_FILE"
+    exit 1
+fi
+
+source "$CONFIG_FILE"
+
+DEV_NAME=$(basename "$DEVICE")
+SYSTEMD_DEV=$(systemd-escape --path "$DEVICE").device
+
+# Generate systemd service
+cat > /usr/lib/systemd/system/ulog.service << EOF
+[Unit]
+Description=USB Serial Logger
+After=${SYSTEMD_DEV}
+BindsTo=${SYSTEMD_DEV}
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ulog
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Generate udev rule
+cat > /etc/udev/rules.d/99-ulog.rules << EOF
+ACTION=="add", KERNEL=="$DEV_NAME", TAG+="systemd", ENV{SYSTEMD_WANTS}="ulog.service"
+EOF
+
+mkdir -p "$LOG_DIR"
+
+udevadm control --reload-rules
+systemctl daemon-reload
+
+echo "Generated config for device: $DEVICE"

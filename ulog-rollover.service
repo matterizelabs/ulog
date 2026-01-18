@@ -1,0 +1,6 @@
+[Unit]
+Description=Restart ulog for day rollover
+
+[Service]
+Type=oneshot
+ExecStart=/bin/systemctl try-restart ulog.service

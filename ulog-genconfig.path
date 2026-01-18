@@ -1,0 +1,8 @@
+[Unit]
+Description=Watch ulog config for changes
+
+[Path]
+PathModified=/etc/ulog.conf
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,7 @@
+[Unit]
+Description=Regenerate ulog config
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/ulog-genconfig
+ExecStartPost=/bin/systemctl try-restart ulog.service
