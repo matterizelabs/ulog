@@ -20,6 +20,9 @@ jobs:
       - name: Install build dependencies
         run: sudo apt-get update && sudo apt-get install -y build-essential debhelper
 
+      - name: Setup Debian packaging
+        run: ln -s packaging/debian debian
+
       - name: Build Debian package
         run: dpkg-buildpackage -us -uc -b
 
@@ -28,11 +31,9 @@ jobs:
           mkdir -p dist
           tar -czvf dist/ulog-${{ steps.version.outputs.VERSION }}.tar.gz \
             --transform "s,^,ulog-${{ steps.version.outputs.VERSION }}/," \
-            ulog.sh ulog.conf ulog-genconfig \
-            ulog-genconfig.path ulog-genconfig.service \
-            ulog-rollover.service ulog-rollover.timer \
-            ulog.install install.sh \
-            LICENSE README.md
+            src/ services/ \
+            packaging/arch/ulog.install \
+            install.sh LICENSE README.md
 
       - name: Move deb to dist
         run: mv ../ulog_${{ steps.version.outputs.VERSION }}-1_all.deb dist/
