@@ -1,0 +1,48 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential debhelper
+
+      - name: Build Debian package
+        run: dpkg-buildpackage -us -uc -b
+
+      - name: Create tarball
+        run: |
+          mkdir -p dist
+          tar -czvf dist/ulog-${{ steps.version.outputs.VERSION }}.tar.gz \
+            --transform "s,^,ulog-${{ steps.version.outputs.VERSION }}/," \
+            ulog.sh ulog.conf ulog-genconfig \
+            ulog-genconfig.path ulog-genconfig.service \
+            ulog-rollover.service ulog-rollover.timer \
+            ulog.install install.sh \
+            LICENSE README.md
+
+      - name: Move deb to dist
+        run: mv ../ulog_${{ steps.version.outputs.VERSION }}-1_all.deb dist/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            dist/ulog-${{ steps.version.outputs.VERSION }}.tar.gz
+            dist/ulog_${{ steps.version.outputs.VERSION }}-1_all.deb
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
