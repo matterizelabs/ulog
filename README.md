@@ -22,11 +22,13 @@ Or manually:
 
 ```bash
 git clone https://github.com/matterizelabs/ulog.git
-cd ulog
+cd ulog/packaging/arch
 makepkg -si
 ```
 
 ### Debian/Ubuntu
+
+Download from [releases](https://github.com/matterizelabs/ulog/releases):
 
 ```bash
 sudo dpkg -i ulog_1.0.0_all.deb
@@ -35,6 +37,8 @@ sudo dpkg -i ulog_1.0.0_all.deb
 ### Manual (root-only systems)
 
 ```bash
+git clone https://github.com/matterizelabs/ulog.git
+cd ulog
 ./install.sh
 ```
 
@@ -84,7 +88,7 @@ Jan 18 14:30:00 sensor reading: 42.5
 Jan 18 14:30:01 sensor reading: 43.1
 ```
 
-## Directory Structure
+## Log Directory Structure
 
 ```
 /var/log/ttyUSB0/
@@ -93,6 +97,24 @@ Jan 18 14:30:01 sensor reading: 43.1
     2026-01-18_15-45-30.log
   2026-01-19/
     2026-01-19_00-00-01.log
+```
+
+## Project Structure
+
+```
+ulog/
+  src/                    # Source files
+    ulog.sh               # Main logger script
+    ulog-genconfig        # Config generator
+    ulog.conf             # Default configuration
+  services/               # Systemd units
+    ulog-genconfig.path   # Watch config for changes
+    ulog-genconfig.service
+    ulog-rollover.service
+    ulog-rollover.timer
+  packaging/              # Distribution packages
+    arch/                 # Arch Linux (AUR)
+    debian/               # Debian/Ubuntu
 ```
 
 ## Dependencies
