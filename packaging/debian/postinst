@@ -2,12 +2,28 @@
 set -e
 
 if [ "$1" = "configure" ]; then
+    # Create ulog system user if not exists
+    if ! getent passwd ulog >/dev/null; then
+        adduser --system --group --no-create-home --shell /usr/sbin/nologin ulog
+    fi
+
+    # Add ulog to dialout group for serial port access
+    usermod -aG dialout ulog
+
+    # Set config file permissions (root:ulog 0640)
+    chown root:ulog /etc/ulog.conf
+    chmod 0640 /etc/ulog.conf
+
+    # Generate initial config (creates service file and udev rule)
     /usr/bin/ulog-genconfig
+
     systemctl daemon-reload
+    udevadm control --reload-rules
+
     echo ""
     echo "ulog installed."
     echo "Enable with: systemctl enable --now ulog.service ulog-rollover.timer ulog-genconfig.path"
-    echo "Config: /etc/ulog.conf (changes auto-applied)"
+    echo "Config: /etc/ulog.conf (root:ulog 0640)"
     echo ""
 fi
 

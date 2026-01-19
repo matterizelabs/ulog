@@ -9,8 +9,11 @@ Rules-Requires-Root: no
 
 Package: ulog
 Architecture: all
-Depends: ${misc:Depends}, socat, moreutils
+Depends: ${misc:Depends}, socat, moreutils, adduser
 Description: USB serial port logger with automatic session management
  Logs serial data from USB devices with syslog-style timestamps.
  Features automatic daily log rotation, new log file on service restart,
  auto-start on device hotplug, and config changes are auto-applied.
+ .
+ Security hardened with input validation, dedicated service user,
+ and systemd sandboxing.

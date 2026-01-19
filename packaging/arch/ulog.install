@@ -1,16 +1,48 @@
 post_install() {
+    # Create ulog user if not exists
+    if ! getent passwd ulog &>/dev/null; then
+        useradd -r -s /sbin/nologin -d /nonexistent -c "ulog service account" ulog
+    fi
+    usermod -aG dialout ulog
+
+    # Set config file permissions (root:ulog 0640)
+    chown root:ulog /etc/ulog.conf
+    chmod 0640 /etc/ulog.conf
+
+    # Generate initial config
     /usr/bin/ulog-genconfig
+
+    udevadm control --reload-rules
     systemctl daemon-reload
+
     echo ""
     echo "ulog installed."
     echo "Enable with: systemctl enable --now ulog.service ulog-rollover.timer ulog-genconfig.path"
-    echo "Config: /etc/ulog.conf (changes auto-applied)"
+    echo "Config: /etc/ulog.conf (root:ulog 0640)"
     echo ""
 }
 
 post_upgrade() {
+    # Ensure user exists and has correct groups
+    if ! getent passwd ulog &>/dev/null; then
+        useradd -r -s /sbin/nologin -d /nonexistent -c "ulog service account" ulog
+    fi
+    usermod -aG dialout ulog
+
+    # Ensure config permissions
+    chown root:ulog /etc/ulog.conf
+    chmod 0640 /etc/ulog.conf
+
+    # Regenerate config
     /usr/bin/ulog-genconfig
+
+    udevadm control --reload-rules
     systemctl daemon-reload
+}
+
+pre_remove() {
+    systemctl stop ulog.service ulog-rollover.timer ulog-genconfig.path 2>/dev/null || true
+    systemctl disable ulog.service ulog-rollover.timer ulog-genconfig.path 2>/dev/null || true
 }
 
 post_remove() {
@@ -18,4 +50,6 @@ post_remove() {
     rm -f /usr/lib/systemd/system/ulog.service
     udevadm control --reload-rules
     systemctl daemon-reload
+
+    echo "ulog removed. Log files preserved in /var/log/. User 'ulog' not removed."
 }

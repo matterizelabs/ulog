@@ -1,3 +1,20 @@
+ulog (1.1.0-1) stable; urgency=high
+
+  * Security release: Fix multiple critical vulnerabilities
+  * Replace unsafe config sourcing with safe parser
+  * Add strict device path validation
+  * Add baud rate whitelist validation
+  * Add path traversal protection for LOG_DIR
+  * Add udev rule injection protection
+  * Hardcode config path, remove env override
+  * Add comprehensive systemd security hardening
+  * Add symlink attack protection
+  * Use atomic file writes
+  * Create dedicated 'ulog' service user
+  * Config file now root:ulog 0640
+
+ -- Abu <abu@matterize.io>  Sat, 18 Jan 2026 15:00:00 +0000
+
 ulog (1.0.0-1) stable; urgency=medium
 
   * Initial release

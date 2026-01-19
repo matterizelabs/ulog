@@ -7,6 +7,9 @@ if [ "$1" = "remove" ]; then
     rm -f /etc/udev/rules.d/99-ulog.rules
     rm -f /lib/systemd/system/ulog.service
     udevadm control --reload-rules 2>/dev/null || true
+    systemctl daemon-reload 2>/dev/null || true
+
+    echo "ulog removed. Log files preserved in /var/log/. User 'ulog' not removed."
 fi
 
 #DEBHELPER#
