@@ -27,22 +27,25 @@ get_device_identity() {
     local product_id="unknown"
     local serial="unknown"
 
-    # Resolve symlink to get real path, then go up to USB device
+    # Resolve symlink to get real path, then search up for USB attributes
     local tty_device="/sys/class/tty/$dev_name/device"
-    if [[ -L "$tty_device" ]]; then
-        local usb_interface usb_device
-        usb_interface=$(readlink -f "$tty_device")
-        usb_device="${usb_interface%/*}"  # Go up one level to USB device
+    if [[ -e "$tty_device" ]]; then
+        local search_path
+        search_path=$(readlink -f "$tty_device")
 
-        if [[ -f "$usb_device/idVendor" ]]; then
-            vendor_id=$(cat "$usb_device/idVendor" 2>/dev/null || echo "unknown")
-        fi
-        if [[ -f "$usb_device/idProduct" ]]; then
-            product_id=$(cat "$usb_device/idProduct" 2>/dev/null || echo "unknown")
-        fi
-        if [[ -f "$usb_device/serial" ]]; then
-            serial=$(cat "$usb_device/serial" 2>/dev/null || echo "unknown")
-        fi
+        # Walk up the directory tree looking for idVendor
+        while [[ "$search_path" != "/" && "$search_path" != "/sys/devices" ]]; do
+            if [[ -f "$search_path/idVendor" ]]; then
+                vendor_id=$(cat "$search_path/idVendor" 2>/dev/null | tr -d '[:space:]')
+                product_id=$(cat "$search_path/idProduct" 2>/dev/null | tr -d '[:space:]')
+                serial=$(cat "$search_path/serial" 2>/dev/null | tr -d '[:space:]')
+                [[ -z "$vendor_id" ]] && vendor_id="unknown"
+                [[ -z "$product_id" ]] && product_id="unknown"
+                [[ -z "$serial" ]] && serial="unknown"
+                break
+            fi
+            search_path="${search_path%/*}"
+        done
     fi
 
     echo "${vendor_id}:${product_id}:${serial}"
@@ -79,9 +82,22 @@ store_device_identity() {
     echo "$identity" > "$identity_file"
 }
 
-# Generate a new session ID (timestamp_pid format)
+# Format identity for display (truncate serial to 8 chars)
+format_identity() {
+    local identity="$1"
+    local vendor product serial
+    IFS=':' read -r vendor product serial <<< "$identity"
+    if [[ ${#serial} -gt 8 ]]; then
+        serial="${serial:0:8}"
+    fi
+    echo "${vendor}:${product}:${serial}"
+}
+
+# Generate a new session ID (short format: MMDD-HHMM-xxxx)
 generate_session_id() {
-    echo "$(date +%Y%m%d_%H%M%S)_$$"
+    local rand
+    rand=$(head -c 4 /dev/urandom | od -An -tx1 | tr -d ' \n' | head -c 4)
+    echo "$(date +%m%d-%H%M)-${rand}"
 }
 
 # Get current session ID for a device, or generate new one
@@ -344,16 +360,15 @@ log_device_worker() {
     session_start=$(date -Iseconds)
     force_new_session="false"
 
-    log_device "$name" "Device identity: $identity"
+    log_device "$name" "Device identity: $(format_identity "$identity")"
 
     if device_identity_changed "$dev_name" "$identity"; then
         local old_identity_file="$STATE_DIR/${dev_name}.identity"
         if [[ -f "$old_identity_file" ]]; then
             local old_identity
             old_identity=$(cat "$old_identity_file" 2>/dev/null || echo "unknown")
-            log_device "$name" "WARNING: Device identity changed on $device: was $old_identity, now $identity"
-            # Log to systemd journal as well
-            logger -t ulog -p daemon.warning "Device identity changed on $device: was $old_identity, now $identity"
+            log_device "$name" "WARNING: Device identity changed: was $(format_identity "$old_identity"), now $(format_identity "$identity")"
+            logger -t ulog -p daemon.warning "Device identity changed on $device: was $(format_identity "$old_identity"), now $(format_identity "$identity")"
         fi
         store_device_identity "$dev_name" "$identity"
         force_new_session="true"
