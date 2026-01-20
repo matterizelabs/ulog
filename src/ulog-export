@@ -14,10 +14,14 @@ Options:
   --list                    List sessions (requires --device or --all)
   --device DEVICE           Device name (e.g., ttyUSB0)
   --session SESSION_ID      Export specific session(s), comma-separated for multiple
-  --identity IDENTITY       Export all sessions matching device identity (vendor:product:serial)
+  --vendor VENDOR_ID        Filter by USB vendor ID (e.g., 10c4)
+  --product PRODUCT_ID      Filter by USB product ID (e.g., ea60)
+  --serial SERIAL           Filter by USB serial (prefix match, e.g., daea5961)
   --output FILE             Output file (default: stdout)
   --no-header               Omit export header in output
   --all                     List sessions from all devices
+
+Session IDs use format: MMDD-HHMM-xxxx (e.g., 0120-1830-a1b2)
 
 Examples:
   # List all sessions for a device
@@ -27,22 +31,39 @@ Examples:
   ulog-export --list --all
 
   # Export specific session to file
-  ulog-export --session 20260118_143000_12345 --device ttyUSB0 --output session.log
+  ulog-export --session 0120-1830-a1b2 --device ttyUSB0 --output session.log
 
   # Export latest/current session
   ulog-export --device ttyUSB0 --output latest.log
 
   # Export multiple sessions combined
-  ulog-export --session 20260118_143000_12345,20260118_200000_67890 --device ttyUSB0 --output combined.log
+  ulog-export --session 0120-1830-a1b2,0120-1900-c3d4 --device ttyUSB0 --output combined.log
 
-  # Export all sessions from a specific physical device
-  ulog-export --identity 0403:6001:A12345 --output all_ftdi.log
+  # Export all sessions from devices with specific vendor ID (e.g., Silicon Labs)
+  ulog-export --vendor 10c4 --output silabs.log
+
+  # Export all sessions from specific vendor and product
+  ulog-export --vendor 10c4 --product ea60 --output cp210x.log
+
+  # Export from specific physical device (when multiple have same vendor:product)
+  ulog-export --vendor 10c4 --product ea60 --serial daea5961 --output device1.log
 EOF
     exit "${1:-0}"
 }
 
 log_error() { echo "ulog-export: ERROR: $*" >&2; }
 log_info() { echo "ulog-export: $*" >&2; }
+
+# Format identity for display (truncate serial to 8 chars)
+format_identity() {
+    local identity="$1"
+    local vendor product serial
+    IFS=':' read -r vendor product serial <<< "$identity"
+    if [[ ${#serial} -gt 8 ]]; then
+        serial="${serial:0:8}"
+    fi
+    echo "${vendor}:${product}:${serial}"
+}
 
 # Parse session.index file and output session info
 # Format: session_id|start_time|end_time|identity|files
@@ -55,17 +76,28 @@ list_sessions() {
         return 1
     fi
 
-    printf "%-25s %-25s %-10s %-25s %s\n" "SESSION_ID" "START_TIME" "STATUS" "IDENTITY" "FILES"
-    printf "%s\n" "$(printf '=%.0s' {1..120})"
+    printf "%-18s %-22s %-25s %-20s %s\n" "SESSION" "START" "END" "IDENTITY" "FILES"
+    printf "%s\n" "$(printf '=%.0s' {1..100})"
 
     while IFS='|' read -r session_id start_time end_time identity files || [[ -n "$session_id" ]]; do
         [[ -z "$session_id" || "$session_id" =~ ^# ]] && continue
 
-        local status="$end_time"
-        local file_count
+        local file_count display_identity
         file_count=$(echo "$files" | tr ',' '\n' | wc -l)
+        display_identity=$(format_identity "$identity")
 
-        printf "%-25s %-25s %-10s %-25s %d file(s)\n" "$session_id" "$start_time" "$status" "$identity" "$file_count"
+        # Format timestamps for display (remove timezone)
+        local display_start display_end
+        display_start="${start_time%+*}"
+        display_start="${display_start/T/ }"
+        if [[ "$end_time" == "ongoing" ]]; then
+            display_end="ongoing"
+        else
+            display_end="${end_time%+*}"
+            display_end="${display_end/T/ }"
+        fi
+
+        printf "%-18s %-22s %-25s %-20s %d file(s)\n" "$session_id" "$display_start" "$display_end" "$display_identity" "$file_count"
     done < "$index_file"
 }
 
@@ -121,9 +153,11 @@ get_latest_session() {
     grep -v '^#' "$index_file" | tail -1 | cut -d'|' -f1
 }
 
-# Find sessions by identity
-find_sessions_by_identity() {
-    local identity="$1"
+# Find sessions by vendor/product/serial filter
+find_sessions_by_filter() {
+    local vendor_filter="$1"
+    local product_filter="$2"
+    local serial_filter="$3"
     local found_sessions=()
 
     for device_dir in "$LOG_BASE"/*/; do
@@ -136,7 +170,25 @@ find_sessions_by_identity() {
 
         while IFS='|' read -r session_id start_time end_time sess_identity files || [[ -n "$session_id" ]]; do
             [[ -z "$session_id" || "$session_id" =~ ^# ]] && continue
-            if [[ "$sess_identity" == "$identity" ]]; then
+
+            # Parse identity: vendor:product:serial
+            local sess_vendor sess_product sess_serial
+            IFS=':' read -r sess_vendor sess_product sess_serial <<< "$sess_identity"
+
+            # Match against filters
+            local match=true
+            if [[ -n "$vendor_filter" && "$sess_vendor" != "$vendor_filter" ]]; then
+                match=false
+            fi
+            if [[ -n "$product_filter" && "$sess_product" != "$product_filter" ]]; then
+                match=false
+            fi
+            # Serial uses prefix match (user can provide truncated serial)
+            if [[ -n "$serial_filter" && "$sess_serial" != "$serial_filter"* ]]; then
+                match=false
+            fi
+
+            if [[ "$match" == "true" ]]; then
                 found_sessions+=("$device:$session_id")
             fi
         done < "$index_file"
@@ -268,16 +320,22 @@ EOF
     fi
 }
 
-# Export by identity (all sessions from a specific physical device)
-export_by_identity() {
-    local identity="$1"
-    local output="$2"
-    local no_header="$3"
+# Export by vendor/product/serial filter
+export_by_filter() {
+    local vendor_filter="$1"
+    local product_filter="$2"
+    local serial_filter="$3"
+    local output="$4"
+    local no_header="$5"
 
     local sessions
-    sessions=$(find_sessions_by_identity "$identity")
+    sessions=$(find_sessions_by_filter "$vendor_filter" "$product_filter" "$serial_filter")
     if [[ -z "$sessions" ]]; then
-        log_error "No sessions found with identity: $identity"
+        local filter_desc=""
+        [[ -n "$vendor_filter" ]] && filter_desc="vendor=$vendor_filter"
+        [[ -n "$product_filter" ]] && filter_desc="${filter_desc:+$filter_desc, }product=$product_filter"
+        [[ -n "$serial_filter" ]] && filter_desc="${filter_desc:+$filter_desc, }serial=$serial_filter"
+        log_error "No sessions found matching: $filter_desc"
         return 1
     fi
 
@@ -342,7 +400,9 @@ main() {
     local list_mode=false
     local device=""
     local session_id=""
-    local identity=""
+    local vendor=""
+    local product=""
+    local serial=""
     local output=""
     local no_header=false
     local all_devices=false
@@ -361,8 +421,16 @@ main() {
                 session_id="$2"
                 shift 2
                 ;;
-            --identity)
-                identity="$2"
+            --vendor)
+                vendor="$2"
+                shift 2
+                ;;
+            --product)
+                product="$2"
+                shift 2
+                ;;
+            --serial)
+                serial="$2"
                 shift 2
                 ;;
             --output)
@@ -400,9 +468,9 @@ main() {
         return
     fi
 
-    # Export by identity
-    if [[ -n "$identity" ]]; then
-        export_by_identity "$identity" "$output" "$no_header"
+    # Export by vendor/product/serial filter
+    if [[ -n "$vendor" || -n "$product" || -n "$serial" ]]; then
+        export_by_filter "$vendor" "$product" "$serial" "$output" "$no_header"
         return
     fi
 
