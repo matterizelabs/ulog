@@ -11,12 +11,14 @@ readonly VALID_BAUDS=(300 1200 2400 4800 9600 19200 38400 57600 115200 230400 46
 log_error() { echo "ulog-genconfig: ERROR: $*" >&2; }
 log_info() { echo "ulog-genconfig: $*"; }
 
-# Safe config parser
+# Safe config parser - sets PARSED_DEVICE, PARSED_BAUD, PARSED_LOG_DIR
 parse_config() {
     local config_file="$1"
-    local -n _device=$2
-    local -n _baud=$3
-    local -n _log_dir=$4
+
+    # Reset parsed values
+    PARSED_DEVICE=""
+    PARSED_BAUD=""
+    PARSED_LOG_DIR=""
 
     if [[ ! -f "$config_file" ]]; then
         return 1
@@ -35,9 +37,9 @@ parse_config() {
         value=$(echo "$value" | xargs)
 
         case "$key" in
-            DEVICE)  _device="$value" ;;
-            BAUD)    _baud="$value" ;;
-            LOG_DIR) _log_dir="$value" ;;
+            DEVICE)  PARSED_DEVICE="$value" ;;
+            BAUD)    PARSED_BAUD="$value" ;;
+            LOG_DIR) PARSED_LOG_DIR="$value" ;;
         esac
     done < "$config_file"
 }
@@ -102,8 +104,11 @@ main() {
         for config in "$CONFIG_DIR"/*.conf; do
             [[ -f "$config" ]] || continue
 
-            local device="" baud="" log_dir=""
-            parse_config "$config" device baud log_dir || continue
+            parse_config "$config" || continue
+
+            local device="$PARSED_DEVICE"
+            local baud="$PARSED_BAUD"
+            local log_dir="$PARSED_LOG_DIR"
 
             if [[ -z "$device" ]]; then
                 log_error "No DEVICE in $config, skipping"
@@ -142,8 +147,10 @@ main() {
 
     # Fallback: use main config if no device configs
     if [[ ${#devices[@]} -eq 0 ]] && [[ -f "$CONFIG_FILE" ]]; then
-        local device="" baud="" log_dir=""
-        parse_config "$CONFIG_FILE" device baud log_dir
+        parse_config "$CONFIG_FILE"
+
+        local device="$PARSED_DEVICE"
+        local log_dir="$PARSED_LOG_DIR"
 
         if [[ -n "$device" ]] && validate_device "$device"; then
             local dev_name
@@ -243,7 +250,8 @@ EOF
     # Generate udev rules for all devices
     local udev_content=""
     for dev_name in "${dev_names[@]}"; do
-        udev_content+="ACTION==\"add\", KERNEL==\"${dev_name}\", TAG+=\"systemd\", ENV{SYSTEMD_WANTS}=\"ulog.service\"\n"
+        # Set device permissions and trigger service start
+        udev_content+="ACTION==\"add\", KERNEL==\"${dev_name}\", GROUP=\"ulog\", MODE=\"0660\", TAG+=\"systemd\", ENV{SYSTEMD_WANTS}=\"ulog.service\"\n"
     done
 
     atomic_write "/etc/udev/rules.d/99-ulog.rules" "$(echo -e "$udev_content")"

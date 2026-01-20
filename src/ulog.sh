@@ -15,12 +15,14 @@ log_info() { echo "ulog: $*"; }
 log_device() { echo "ulog[$1]: $2"; }
 log_device_error() { echo "ulog[$1]: ERROR: $2" >&2; }
 
-# Parse config file safely
+# Parse config file safely - sets PARSED_DEVICE, PARSED_BAUD, PARSED_LOG_DIR
 parse_config() {
     local config_file="$1"
-    local -n _device=$2
-    local -n _baud=$3
-    local -n _log_dir=$4
+
+    # Reset parsed values
+    PARSED_DEVICE=""
+    PARSED_BAUD=""
+    PARSED_LOG_DIR=""
 
     if [[ ! -f "$config_file" ]]; then
         log_error "Config file not found: $config_file"
@@ -47,9 +49,9 @@ parse_config() {
         value=$(echo "$value" | xargs)
 
         case "$key" in
-            DEVICE)  _device="$value" ;;
-            BAUD)    _baud="$value" ;;
-            LOG_DIR) _log_dir="$value" ;;
+            DEVICE)  PARSED_DEVICE="$value" ;;
+            BAUD)    PARSED_BAUD="$value" ;;
+            LOG_DIR) PARSED_LOG_DIR="$value" ;;
         esac
     done < "$config_file"
 }
@@ -215,9 +217,8 @@ main() {
     local default_baud="115200"
 
     if [[ -f "$CONFIG_FILE" ]]; then
-        local _dev="" _baud="" _log=""
-        parse_config "$CONFIG_FILE" _dev _baud _log
-        [[ -n "$_baud" ]] && default_baud="$_baud"
+        parse_config "$CONFIG_FILE" || true
+        [[ -n "$PARSED_BAUD" ]] && default_baud="$PARSED_BAUD"
     fi
 
     local device_count=0
@@ -227,8 +228,11 @@ main() {
         for config in "$CONFIG_DIR"/*.conf; do
             [[ -f "$config" ]] || continue
 
-            local device="" baud="$default_baud" log_dir=""
-            parse_config "$config" device baud log_dir || continue
+            parse_config "$config" || continue
+
+            local device="$PARSED_DEVICE"
+            local baud="${PARSED_BAUD:-$default_baud}"
+            local log_dir="$PARSED_LOG_DIR"
 
             if [[ -z "$device" ]]; then
                 log_error "No DEVICE in $config, skipping"
@@ -256,8 +260,11 @@ main() {
     # Fallback: if no device configs, use main config (backwards compatible)
     if [[ $device_count -eq 0 ]]; then
         if [[ -f "$CONFIG_FILE" ]]; then
-            local device="" baud="$default_baud" log_dir=""
-            parse_config "$CONFIG_FILE" device baud log_dir
+            parse_config "$CONFIG_FILE" || true
+
+            local device="$PARSED_DEVICE"
+            local baud="${PARSED_BAUD:-$default_baud}"
+            local log_dir="$PARSED_LOG_DIR"
 
             if [[ -n "$device" ]]; then
                 [[ -z "$log_dir" ]] && log_dir="/var/log/ulog/$(basename "$device")"
