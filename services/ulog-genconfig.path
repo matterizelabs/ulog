@@ -3,6 +3,7 @@ Description=Watch ulog config for changes
 
 [Path]
 PathModified=/etc/ulog.conf
+PathModified=/etc/ulog.d
 
 [Install]
 WantedBy=multi-user.target

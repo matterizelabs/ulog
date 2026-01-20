@@ -1,202 +1,186 @@
 #!/bin/bash
-# ulog-genconfig - regenerate udev rule and systemd service from config
-# Note: This script must run as root to write system files
+# ulog-genconfig - regenerate udev rules and systemd service from config
+# Supports multiple devices via /etc/ulog.d/*.conf
 
 set -euo pipefail
 
-# Hardcoded config path - do not allow override
 readonly CONFIG_FILE="/etc/ulog.conf"
-
-# Valid baud rates whitelist
+readonly CONFIG_DIR="/etc/ulog.d"
 readonly VALID_BAUDS=(300 1200 2400 4800 9600 19200 38400 57600 115200 230400 460800 921600)
 
-# Logging functions
 log_error() { echo "ulog-genconfig: ERROR: $*" >&2; }
 log_info() { echo "ulog-genconfig: $*"; }
 
-# Safe config parser - never source config files
+# Safe config parser
 parse_config() {
     local config_file="$1"
+    local -n _device=$2
+    local -n _baud=$3
+    local -n _log_dir=$4
 
     if [[ ! -f "$config_file" ]]; then
-        log_error "Config file not found: $config_file"
         return 1
     fi
 
-    # Check file is owned by root
     local file_owner
     file_owner=$(stat -c %u "$config_file")
-
     if [[ "$file_owner" != "0" ]]; then
         log_error "Config file must be owned by root: $config_file"
         return 1
     fi
 
-    # Parse config safely
     while IFS='=' read -r key value || [[ -n "$key" ]]; do
         [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
-
         key=$(echo "$key" | xargs)
         value=$(echo "$value" | xargs)
 
         case "$key" in
-            DEVICE)  CONFIG_DEVICE="$value" ;;
-            BAUD)    CONFIG_BAUD="$value" ;;
-            LOG_DIR) CONFIG_LOG_DIR="$value" ;;
-            *)       log_error "Unknown config key ignored: $key" ;;
+            DEVICE)  _device="$value" ;;
+            BAUD)    _baud="$value" ;;
+            LOG_DIR) _log_dir="$value" ;;
         esac
     done < "$config_file"
 }
 
-# Validate device path
 validate_device() {
     local device="$1"
-
-    if [[ ! "$device" =~ ^/dev/tty[A-Za-z]+[0-9]*$ ]]; then
-        log_error "Invalid device path format: $device"
-        return 1
-    fi
-
-    if [[ "$device" =~ [!\"\'\`\$\(\)\{\}\[\]\|\;\&\<\>] ]]; then
-        log_error "Device path contains invalid characters: $device"
-        return 1
-    fi
-
+    [[ "$device" =~ ^/dev/tty[A-Za-z]+[0-9]*$ ]] || return 1
+    [[ ! "$device" =~ [!\"\'\`\$\(\)\{\}\[\]\|\;\&\<\>] ]] || return 1
     return 0
 }
 
-# Validate device name for udev rule
 validate_dev_name() {
     local dev_name="$1"
-
-    # Must be alphanumeric only (ttyUSB0, ttyACM0, etc.)
-    if [[ ! "$dev_name" =~ ^tty[A-Za-z]+[0-9]*$ ]]; then
-        log_error "Invalid device name for udev rule: $dev_name"
-        return 1
-    fi
-
-    # Extra check: no special chars that could escape udev rule
-    if [[ "$dev_name" =~ [\"\'\`\$\(\)\{\}\[\]\|\;\&\<\>\,\=] ]]; then
-        log_error "Device name contains characters that could inject into udev rule: $dev_name"
-        return 1
-    fi
-
+    [[ "$dev_name" =~ ^tty[A-Za-z]+[0-9]*$ ]] || return 1
+    [[ ! "$dev_name" =~ [\"\'\`\$\(\)\{\}\[\]\|\;\&\<\>\,\=] ]] || return 1
     return 0
 }
 
-# Validate baud rate
 validate_baud() {
     local baud="$1"
-
-    if [[ ! "$baud" =~ ^[0-9]+$ ]]; then
-        log_error "Invalid baud rate (must be numeric): $baud"
-        return 1
-    fi
-
-    local valid=0
+    [[ "$baud" =~ ^[0-9]+$ ]] || return 1
     for valid_baud in "${VALID_BAUDS[@]}"; do
-        [[ "$baud" == "$valid_baud" ]] && valid=1 && break
+        [[ "$baud" == "$valid_baud" ]] && return 0
     done
-
-    if [[ $valid -eq 0 ]]; then
-        log_error "Non-standard baud rate: $baud"
-        return 1
-    fi
-
-    return 0
+    return 1
 }
 
-# Validate log directory
 validate_log_dir() {
     local log_dir="$1"
-
-    if [[ ! "$log_dir" =~ ^/ ]]; then
-        log_error "Log directory must be absolute path: $log_dir"
-        return 1
-    fi
-
-    if [[ "$log_dir" =~ \.\. ]]; then
-        log_error "Log directory must not contain '..': $log_dir"
-        return 1
-    fi
-
-    if [[ ! "$log_dir" =~ ^/[a-zA-Z0-9/_-]+$ ]]; then
-        log_error "Log directory contains invalid characters: $log_dir"
-        return 1
-    fi
-
+    [[ "$log_dir" =~ ^/ ]] || return 1
+    [[ ! "$log_dir" =~ \.\. ]] || return 1
+    [[ "$log_dir" =~ ^/[a-zA-Z0-9/_-]+$ ]] || return 1
     local canonical_dir
     canonical_dir=$(realpath -m "$log_dir")
-
-    if [[ ! "$canonical_dir" =~ ^/var/log/ ]]; then
-        log_error "Log directory must be under /var/log/: $log_dir"
-        return 1
-    fi
-
-    return 0
+    [[ "$canonical_dir" =~ ^/var/log/ ]] && return 0
+    return 1
 }
 
-# Atomic file write
 atomic_write() {
     local target="$1"
     local content="$2"
     local temp_file
-
     temp_file=$(mktemp)
-    trap "rm -f '$temp_file'" EXIT
-
     echo "$content" > "$temp_file"
     chmod 0644 "$temp_file"
     mv "$temp_file" "$target"
-
-    trap - EXIT
 }
 
-# Main
 main() {
-    # Check running as root
     if [[ $EUID -ne 0 ]]; then
         log_error "This script must be run as root"
         exit 1
     fi
 
-    # Defaults
-    local device="/dev/ttyUSB0"
-    local baud="115200"
-    local log_dir="/var/log/ttyUSB0"
+    # Collect all devices and log directories
+    declare -a devices=()
+    declare -a dev_names=()
+    declare -a log_dirs=()
 
-    # Parse config
-    if [[ -f "$CONFIG_FILE" ]]; then
-        parse_config "$CONFIG_FILE"
-        device="${CONFIG_DEVICE:-$device}"
-        baud="${CONFIG_BAUD:-$baud}"
-        log_dir="${CONFIG_LOG_DIR:-$log_dir}"
-    else
-        log_error "Config file not found: $CONFIG_FILE"
+    # Process device configs from /etc/ulog.d/
+    if [[ -d "$CONFIG_DIR" ]]; then
+        for config in "$CONFIG_DIR"/*.conf; do
+            [[ -f "$config" ]] || continue
+
+            local device="" baud="" log_dir=""
+            parse_config "$config" device baud log_dir || continue
+
+            if [[ -z "$device" ]]; then
+                log_error "No DEVICE in $config, skipping"
+                continue
+            fi
+
+            if ! validate_device "$device"; then
+                log_error "Invalid device in $config: $device"
+                continue
+            fi
+
+            local dev_name
+            dev_name=$(basename "$device")
+            if ! validate_dev_name "$dev_name"; then
+                log_error "Invalid device name: $dev_name"
+                continue
+            fi
+
+            # Default log_dir
+            if [[ -z "$log_dir" ]]; then
+                log_dir="/var/log/ulog/$dev_name"
+            fi
+
+            if ! validate_log_dir "$log_dir"; then
+                log_error "Invalid log directory in $config: $log_dir"
+                continue
+            fi
+
+            devices+=("$device")
+            dev_names+=("$dev_name")
+            log_dirs+=("$log_dir")
+
+            log_info "Found device: $device -> $log_dir"
+        done
+    fi
+
+    # Fallback: use main config if no device configs
+    if [[ ${#devices[@]} -eq 0 ]] && [[ -f "$CONFIG_FILE" ]]; then
+        local device="" baud="" log_dir=""
+        parse_config "$CONFIG_FILE" device baud log_dir
+
+        if [[ -n "$device" ]] && validate_device "$device"; then
+            local dev_name
+            dev_name=$(basename "$device")
+
+            if validate_dev_name "$dev_name"; then
+                [[ -z "$log_dir" ]] && log_dir="/var/log/ulog/$dev_name"
+
+                if validate_log_dir "$log_dir"; then
+                    devices+=("$device")
+                    dev_names+=("$dev_name")
+                    log_dirs+=("$log_dir")
+                    log_info "Found device: $device -> $log_dir"
+                fi
+            fi
+        fi
+    fi
+
+    if [[ ${#devices[@]} -eq 0 ]]; then
+        log_error "No valid devices configured"
         exit 1
     fi
 
-    # Validate all inputs
-    validate_device "$device" || exit 1
-    validate_baud "$baud" || exit 1
-    validate_log_dir "$log_dir" || exit 1
+    # Build ReadWritePaths and DeviceAllow for systemd
+    local read_write_paths=""
+    local device_allow=""
+    for i in "${!devices[@]}"; do
+        read_write_paths+="${log_dirs[$i]} "
+        device_allow+="DeviceAllow=${devices[$i]} rw\n"
+    done
 
-    # Extract and validate device name for udev
-    local dev_name
-    dev_name=$(basename "$device")
-    validate_dev_name "$dev_name" || exit 1
-
-    # Get systemd device unit name
-    local systemd_dev
-    systemd_dev=$(systemd-escape --path "$device").device
-
-    # Generate systemd service with security hardening
+    # Generate systemd service
     local service_content
     read -r -d '' service_content << EOF || true
 [Unit]
 Description=USB Serial Logger
-After=${systemd_dev}
-BindsTo=${systemd_dev}
+After=local-fs.target
 
 [Service]
 Type=simple
@@ -213,8 +197,8 @@ SupplementaryGroups=dialout
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
-ReadWritePaths=${log_dir}
-ReadOnlyPaths=/etc/ulog.conf
+ReadWritePaths=${read_write_paths}
+ReadOnlyPaths=/etc/ulog.conf /etc/ulog.d
 
 # Capability restrictions
 CapabilityBoundingSet=
@@ -222,7 +206,7 @@ NoNewPrivileges=yes
 
 # Device access
 PrivateDevices=no
-DeviceAllow=${device} rw
+$(echo -e "$device_allow")
 
 # Kernel restrictions
 ProtectKernelTunables=yes
@@ -243,26 +227,30 @@ WantedBy=multi-user.target
 EOF
 
     atomic_write "/usr/lib/systemd/system/ulog.service" "$service_content"
+    log_info "Generated: /usr/lib/systemd/system/ulog.service"
 
-    # Generate udev rule with validated device name
-    local udev_content
-    udev_content="ACTION==\"add\", KERNEL==\"${dev_name}\", TAG+=\"systemd\", ENV{SYSTEMD_WANTS}=\"ulog.service\""
+    # Generate udev rules for all devices
+    local udev_content=""
+    for dev_name in "${dev_names[@]}"; do
+        udev_content+="ACTION==\"add\", KERNEL==\"${dev_name}\", TAG+=\"systemd\", ENV{SYSTEMD_WANTS}=\"ulog.service\"\n"
+    done
 
-    atomic_write "/etc/udev/rules.d/99-ulog.rules" "$udev_content"
+    atomic_write "/etc/udev/rules.d/99-ulog.rules" "$(echo -e "$udev_content")"
+    log_info "Generated: /etc/udev/rules.d/99-ulog.rules"
 
-    # Create log directory with proper ownership
-    mkdir -p "$log_dir"
-    chown ulog:ulog "$log_dir"
-    chmod 0750 "$log_dir"
+    # Create log directories
+    for log_dir in "${log_dirs[@]}"; do
+        mkdir -p "$log_dir"
+        chown ulog:ulog "$log_dir"
+        chmod 0750 "$log_dir"
+        log_info "Created: $log_dir"
+    done
 
-    # Reload configurations
+    # Reload
     udevadm control --reload-rules
     systemctl daemon-reload
 
-    log_info "Generated config for device: $device"
-    log_info "Service: /usr/lib/systemd/system/ulog.service"
-    log_info "Udev rule: /etc/udev/rules.d/99-ulog.rules"
-    log_info "Log directory: $log_dir"
+    log_info "Configuration complete for ${#devices[@]} device(s)"
 }
 
 main "$@"

@@ -1,249 +1,295 @@
 #!/bin/bash
-# ulog - USB serial logger
-set -euo pipefail
+# ulog - USB serial logger (multi-device support)
+set -uo pipefail
 
 readonly CONFIG_FILE="/etc/ulog.conf"
-
-# Valid baud rates whitelist
+readonly CONFIG_DIR="/etc/ulog.d"
 readonly VALID_BAUDS=(300 1200 2400 4800 9600 19200 38400 57600 115200 230400 460800 921600)
+
+# Track child PIDs for cleanup
+declare -a CHILD_PIDS=()
 
 # Logging functions
 log_error() { echo "ulog: ERROR: $*" >&2; }
 log_info() { echo "ulog: $*"; }
+log_device() { echo "ulog[$1]: $2"; }
+log_device_error() { echo "ulog[$1]: ERROR: $2" >&2; }
 
+# Parse config file safely
 parse_config() {
     local config_file="$1"
+    local -n _device=$2
+    local -n _baud=$3
+    local -n _log_dir=$4
 
-    # Check file exists and is a regular file
     if [[ ! -f "$config_file" ]]; then
         log_error "Config file not found: $config_file"
         return 1
     fi
 
-    # Check file is owned by root (only root can modify)
-    local file_owner
+    local file_owner file_perms
     file_owner=$(stat -c %u "$config_file")
+    file_perms=$(stat -c %a "$config_file")
 
     if [[ "$file_owner" != "0" ]]; then
         log_error "Config file must be owned by root: $config_file"
         return 1
     fi
 
-    # Check file is not world-writable or world-readable (should be 0640 root:ulog)
-    local file_perms
-    file_perms=$(stat -c %a "$config_file")
-
     if [[ "${file_perms: -1}" != "0" ]]; then
         log_error "Config file must not be world-accessible (expected 0640): $config_file"
         return 1
     fi
 
-    # Parse config safely - only read key=value pairs
     while IFS='=' read -r key value || [[ -n "$key" ]]; do
-        # Skip empty lines and comments
         [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
-
-        # Remove leading/trailing whitespace
         key=$(echo "$key" | xargs)
         value=$(echo "$value" | xargs)
 
-        # Only accept known configuration keys
         case "$key" in
-            DEVICE)  CONFIG_DEVICE="$value" ;;
-            BAUD)    CONFIG_BAUD="$value" ;;
-            LOG_DIR) CONFIG_LOG_DIR="$value" ;;
-            *)       log_error "Unknown config key ignored: $key" ;;
+            DEVICE)  _device="$value" ;;
+            BAUD)    _baud="$value" ;;
+            LOG_DIR) _log_dir="$value" ;;
         esac
     done < "$config_file"
 }
 
-# Validate device path
+# Validation functions
 validate_device() {
     local device="$1"
-
-    # Must match strict pattern: /dev/tty[A-Za-z]+[0-9]*
     if [[ ! "$device" =~ ^/dev/tty[A-Za-z]+[0-9]*$ ]]; then
-        log_error "Invalid device path format: $device"
-        log_error "Device must match pattern: /dev/tty[A-Za-z]+[0-9]*"
         return 1
     fi
-
-    # Ensure no special characters that could be used for injection
     if [[ "$device" =~ [!\"\'\`\$\(\)\{\}\[\]\|\;\&\<\>] ]]; then
-        log_error "Device path contains invalid characters: $device"
         return 1
     fi
-
     return 0
 }
 
-# Validate baud rate
 validate_baud() {
     local baud="$1"
-
-    # Must be numeric only
     if [[ ! "$baud" =~ ^[0-9]+$ ]]; then
-        log_error "Invalid baud rate (must be numeric): $baud"
         return 1
     fi
-
-    # Check against whitelist
-    local valid=0
     for valid_baud in "${VALID_BAUDS[@]}"; do
-        if [[ "$baud" == "$valid_baud" ]]; then
-            valid=1
-            break
-        fi
+        [[ "$baud" == "$valid_baud" ]] && return 0
     done
-
-    if [[ $valid -eq 0 ]]; then
-        log_error "Non-standard baud rate: $baud"
-        log_error "Valid rates: ${VALID_BAUDS[*]}"
-        return 1
-    fi
-
-    return 0
+    return 1
 }
 
-# Validate log directory
 validate_log_dir() {
     local log_dir="$1"
-
-    # Must be absolute path
-    if [[ ! "$log_dir" =~ ^/ ]]; then
-        log_error "Log directory must be absolute path: $log_dir"
+    if [[ ! "$log_dir" =~ ^/ ]] || [[ "$log_dir" =~ \.\. ]]; then
         return 1
     fi
-
-    # No path traversal sequences
-    if [[ "$log_dir" =~ \.\. ]]; then
-        log_error "Log directory must not contain '..': $log_dir"
-        return 1
-    fi
-
-    # Only allow safe characters
     if [[ ! "$log_dir" =~ ^/[a-zA-Z0-9/_-]+$ ]]; then
-        log_error "Log directory contains invalid characters: $log_dir"
         return 1
     fi
-
-    # Canonicalize and ensure under /var/log/
     local canonical_dir
     canonical_dir=$(realpath -m "$log_dir")
-
-    if [[ ! "$canonical_dir" =~ ^/var/log/ ]]; then
-        log_error "Log directory must be under /var/log/: $log_dir"
-        return 1
-    fi
-
-    return 0
+    [[ "$canonical_dir" =~ ^/var/log/ ]] && return 0
+    return 1
 }
 
-# Wait for device to be ready (race condition fix on boot)
+# Wait for device to be ready
 wait_for_device() {
     local device="$1"
     local max_attempts=20
     local attempt=0
 
-    log_info "Waiting for device to be ready: $device"
-
     while [[ $attempt -lt $max_attempts ]]; do
         if [[ -c "$device" ]] && stty -F "$device" &>/dev/null; then
-            log_info "Device ready after $attempt attempts"
             return 0
         fi
         sleep 0.5
         ((attempt++))
     done
-
-    log_error "Device not ready after ${max_attempts} attempts: $device"
     return 1
 }
 
-# Initialize serial port settings
+# Initialize serial port
 init_serial() {
     local device="$1"
     local baud="$2"
 
-    log_info "Initializing serial port: $device at $baud baud"
-
-    # Reset serial port to known state
-    if ! stty -F "$device" "$baud" raw -echo -echoe -echok -echoctl -echonl \
+    stty -F "$device" "$baud" raw -echo -echoe -echok -echoctl -echonl \
          -icanon -iexten -isig -brkint -icrnl -ignbrk -igncr -inlcr \
          -inpck -istrip -ixon -ixoff -parmrk -opost cs8 cread clocal -crtscts \
-         min 1 time 0 2>/dev/null; then
-        log_error "Failed to initialize serial port: $device"
-        return 1
-    fi
-
-    # Small delay to let settings take effect
+         min 1 time 0 2>/dev/null || return 1
     sleep 0.2
-
     return 0
 }
 
-# Safe log file creation
+# Create log file safely
 create_log_file() {
     local log_dir="$1"
     local today="$2"
     local day_dir="$log_dir/$today"
     local logfile="$day_dir/$(date +%Y-%m-%d_%H-%M-%S).log"
 
-    # Create directory with safe permissions
     if [[ ! -d "$day_dir" ]]; then
         mkdir -p "$day_dir"
         chmod 0750 "$day_dir"
     fi
 
-    # Check logfile doesn't exist and isn't a symlink
     if [[ -e "$logfile" || -L "$logfile" ]]; then
-        log_error "Log file already exists or is a symlink: $logfile"
         return 1
     fi
 
-    # Create file with safe permissions
     touch "$logfile"
     chmod 0640 "$logfile"
-
     echo "$logfile"
+}
+
+# Log a single device (runs as child process)
+log_device_worker() {
+    local name="$1"
+    local device="$2"
+    local baud="$3"
+    local log_dir="$4"
+
+    log_device "$name" "Starting logger for $device at $baud baud"
+
+    # Validate
+    if ! validate_device "$device"; then
+        log_device_error "$name" "Invalid device: $device"
+        return 1
+    fi
+    if ! validate_baud "$baud"; then
+        log_device_error "$name" "Invalid baud rate: $baud"
+        return 1
+    fi
+    if ! validate_log_dir "$log_dir"; then
+        log_device_error "$name" "Invalid log directory: $log_dir"
+        return 1
+    fi
+
+    # Wait for device
+    log_device "$name" "Waiting for device..."
+    if ! wait_for_device "$device"; then
+        log_device_error "$name" "Device not ready: $device"
+        return 1
+    fi
+
+    # Initialize serial port
+    log_device "$name" "Initializing serial port..."
+    if ! init_serial "$device" "$baud"; then
+        log_device_error "$name" "Failed to initialize: $device"
+        return 1
+    fi
+
+    # Create log file
+    local today logfile
+    today=$(date +%Y-%m-%d)
+    logfile=$(create_log_file "$log_dir" "$today")
+    if [[ -z "$logfile" ]]; then
+        log_device_error "$name" "Failed to create log file"
+        return 1
+    fi
+
+    log_device "$name" "Logging to $logfile"
+
+    # Start logging
+    exec socat -u "$device,b${baud},raw,echo=0,crtscts=0,clocal=1" STDOUT \
+        | ts '%b %d %H:%M:%S' >> "$logfile"
+}
+
+# Cleanup handler
+cleanup() {
+    log_info "Shutting down..."
+    for pid in "${CHILD_PIDS[@]}"; do
+        if kill -0 "$pid" 2>/dev/null; then
+            kill "$pid" 2>/dev/null
+        fi
+    done
+    wait
+    log_info "All loggers stopped"
+    exit 0
 }
 
 # Main
 main() {
-    # Defaults
-    local device="/dev/ttyUSB0"
-    local baud="115200"
-    local log_dir="/var/log/ttyUSB0"
+    trap cleanup SIGTERM SIGINT SIGHUP
 
-    # Parse config if exists
+    # Load global defaults
+    local default_baud="115200"
+
     if [[ -f "$CONFIG_FILE" ]]; then
-        parse_config "$CONFIG_FILE"
-        device="${CONFIG_DEVICE:-$device}"
-        baud="${CONFIG_BAUD:-$baud}"
-        log_dir="${CONFIG_LOG_DIR:-$log_dir}"
+        local _dev="" _baud="" _log=""
+        parse_config "$CONFIG_FILE" _dev _baud _log
+        [[ -n "$_baud" ]] && default_baud="$_baud"
     fi
 
-    # Validate all inputs
-    validate_device "$device" || exit 1
-    validate_baud "$baud" || exit 1
-    validate_log_dir "$log_dir" || exit 1
+    local device_count=0
 
-    # Wait for device to be ready (handles boot race condition)
-    wait_for_device "$device" || exit 1
+    # Process device configs from /etc/ulog.d/
+    if [[ -d "$CONFIG_DIR" ]]; then
+        for config in "$CONFIG_DIR"/*.conf; do
+            [[ -f "$config" ]] || continue
 
-    # Initialize serial port to known state
-    init_serial "$device" "$baud" || exit 1
+            local device="" baud="$default_baud" log_dir=""
+            parse_config "$config" device baud log_dir || continue
 
-    # Create log file safely
-    local today logfile
-    today=$(date +%Y-%m-%d)
-    logfile=$(create_log_file "$log_dir" "$today") || exit 1
+            if [[ -z "$device" ]]; then
+                log_error "No DEVICE in $config, skipping"
+                continue
+            fi
 
-    log_info "Logging $device ($baud baud) to $logfile"
+            # Default log_dir based on device name
+            if [[ -z "$log_dir" ]]; then
+                local dev_name
+                dev_name=$(basename "$device")
+                log_dir="/var/log/ulog/$dev_name"
+            fi
 
-    # Start logging with socat - using validated inputs only
-    exec socat -u "$device,b${baud},raw,echo=0,crtscts=0,clocal=1" STDOUT \
-        | ts '%b %d %H:%M:%S' >> "$logfile"
+            local name
+            name=$(basename "$config" .conf)
+
+            log_device_worker "$name" "$device" "$baud" "$log_dir" &
+            CHILD_PIDS+=($!)
+            ((device_count++))
+
+            log_info "Started logger for $device (PID: ${CHILD_PIDS[-1]})"
+        done
+    fi
+
+    # Fallback: if no device configs, use main config (backwards compatible)
+    if [[ $device_count -eq 0 ]]; then
+        if [[ -f "$CONFIG_FILE" ]]; then
+            local device="" baud="$default_baud" log_dir=""
+            parse_config "$CONFIG_FILE" device baud log_dir
+
+            if [[ -n "$device" ]]; then
+                [[ -z "$log_dir" ]] && log_dir="/var/log/ulog/$(basename "$device")"
+
+                log_device_worker "default" "$device" "$baud" "$log_dir" &
+                CHILD_PIDS+=($!)
+                ((device_count++))
+
+                log_info "Started logger for $device (PID: ${CHILD_PIDS[-1]})"
+            fi
+        fi
+    fi
+
+    if [[ $device_count -eq 0 ]]; then
+        log_error "No devices configured. Add configs to $CONFIG_DIR/"
+        exit 1
+    fi
+
+    log_info "Started $device_count device logger(s)"
+
+    # Wait for any child to exit, then restart it
+    while true; do
+        for i in "${!CHILD_PIDS[@]}"; do
+            pid="${CHILD_PIDS[$i]}"
+            if ! kill -0 "$pid" 2>/dev/null; then
+                log_info "Logger (PID: $pid) exited, will be restarted by systemd"
+                # Let systemd handle restart
+                exit 1
+            fi
+        done
+        sleep 5
+    done
 }
 
 main "$@"
