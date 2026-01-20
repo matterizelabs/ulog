@@ -124,6 +124,48 @@ clear_session() {
     rm -f "$session_file"
 }
 
+# Store log directory for a device (for cleanup)
+store_log_dir() {
+    local dev_name="$1"
+    local log_dir="$2"
+    mkdir -p "$STATE_DIR"
+    echo "$log_dir" > "$STATE_DIR/${dev_name}.logdir"
+}
+
+# Mark session as ended in session.index
+end_session() {
+    local dev_name="$1"
+    local session_file="$STATE_DIR/${dev_name}.session"
+    local logdir_file="$STATE_DIR/${dev_name}.logdir"
+
+    [[ -f "$session_file" ]] || return 0
+    [[ -f "$logdir_file" ]] || return 0
+
+    local session_id log_dir index_file end_time
+    session_id=$(cat "$session_file")
+    log_dir=$(cat "$logdir_file")
+    index_file="$log_dir/session.index"
+    end_time=$(date -Iseconds)
+
+    [[ -f "$index_file" ]] || return 0
+
+    # Update the session entry to replace "ongoing" with actual end time
+    local tmp_file
+    tmp_file=$(mktemp)
+    while IFS='|' read -r sid stime etime ident files || [[ -n "$sid" ]]; do
+        if [[ "$sid" == "$session_id" ]]; then
+            echo "${sid}|${stime}|${end_time}|${ident}|${files}" >> "$tmp_file"
+        else
+            echo "${sid}${stime:+|$stime}${etime:+|$etime}${ident:+|$ident}${files:+|$files}" >> "$tmp_file"
+        fi
+    done < "$index_file"
+    mv "$tmp_file" "$index_file"
+    chmod 0640 "$index_file"
+
+    # Clean up state files
+    rm -f "$session_file" "$logdir_file"
+}
+
 # Update session index file with new log file entry
 update_session_index() {
     local log_dir="$1"
@@ -390,8 +432,9 @@ log_device_worker() {
     # Write session header to log file
     write_session_header "$logfile" "$session_id" "$session_start" "$device" "$identity"
 
-    # Update session index
+    # Update session index and store log dir for cleanup
     update_session_index "$log_dir" "$session_id" "$session_start" "$identity" "$logfile"
+    store_log_dir "$dev_name" "$log_dir"
 
     log_device "$name" "Logging to $logfile"
 
@@ -409,6 +452,16 @@ cleanup() {
         fi
     done
     wait
+
+    # End all active sessions
+    for session_file in "$STATE_DIR"/*.session; do
+        [[ -f "$session_file" ]] || continue
+        local dev_name
+        dev_name=$(basename "$session_file" .session)
+        end_session "$dev_name"
+        log_info "Ended session for $dev_name"
+    done
+
     log_info "All loggers stopped"
     exit 0
 }
