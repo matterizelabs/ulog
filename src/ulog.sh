@@ -23,19 +23,26 @@ get_device_identity() {
     local dev_name
     dev_name=$(basename "$device")
 
-    local sysfs_base="/sys/class/tty/$dev_name/device/.."
     local vendor_id="unknown"
     local product_id="unknown"
     local serial="unknown"
 
-    if [[ -f "$sysfs_base/idVendor" ]]; then
-        vendor_id=$(cat "$sysfs_base/idVendor" 2>/dev/null || echo "unknown")
-    fi
-    if [[ -f "$sysfs_base/idProduct" ]]; then
-        product_id=$(cat "$sysfs_base/idProduct" 2>/dev/null || echo "unknown")
-    fi
-    if [[ -f "$sysfs_base/serial" ]]; then
-        serial=$(cat "$sysfs_base/serial" 2>/dev/null || echo "unknown")
+    # Resolve symlink to get real path, then go up to USB device
+    local tty_device="/sys/class/tty/$dev_name/device"
+    if [[ -L "$tty_device" ]]; then
+        local usb_interface usb_device
+        usb_interface=$(readlink -f "$tty_device")
+        usb_device="${usb_interface%/*}"  # Go up one level to USB device
+
+        if [[ -f "$usb_device/idVendor" ]]; then
+            vendor_id=$(cat "$usb_device/idVendor" 2>/dev/null || echo "unknown")
+        fi
+        if [[ -f "$usb_device/idProduct" ]]; then
+            product_id=$(cat "$usb_device/idProduct" 2>/dev/null || echo "unknown")
+        fi
+        if [[ -f "$usb_device/serial" ]]; then
+            serial=$(cat "$usb_device/serial" 2>/dev/null || echo "unknown")
+        fi
     fi
 
     echo "${vendor_id}:${product_id}:${serial}"
