@@ -7,8 +7,13 @@ if [ "$1" = "configure" ]; then
         adduser --system --group --no-create-home --shell /usr/sbin/nologin ulog
     fi
 
-    # Add ulog to dialout group for serial port access
-    usermod -aG dialout ulog
+    # Add ulog to serial port groups (varies by distro)
+    # Arch: uucp, Debian/Ubuntu: dialout
+    for group in uucp dialout tty; do
+        if getent group "$group" >/dev/null; then
+            usermod -aG "$group" ulog
+        fi
+    done
 
     # Set config file permissions (root:ulog 0640)
     chown root:ulog /etc/ulog.conf

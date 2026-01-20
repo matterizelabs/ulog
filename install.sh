@@ -12,7 +12,15 @@ echo "Creating ulog user..."
 if ! id -u ulog &>/dev/null; then
     useradd -r -s /sbin/nologin -d /nonexistent -c "ulog service account" ulog
 fi
-usermod -aG dialout ulog
+
+# Add ulog to serial port groups (varies by distro)
+# Arch: uucp, Debian/Ubuntu: dialout
+for group in uucp dialout tty; do
+    if getent group "$group" &>/dev/null; then
+        usermod -aG "$group" ulog
+        echo "Added ulog to group: $group"
+    fi
+done
 
 echo "Installing ulog..."
 install -Dm755 src/ulog.sh /usr/bin/ulog

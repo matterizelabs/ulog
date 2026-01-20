@@ -3,7 +3,11 @@ post_install() {
     if ! getent passwd ulog &>/dev/null; then
         useradd -r -s /sbin/nologin -d /nonexistent -c "ulog service account" ulog
     fi
-    usermod -aG dialout ulog
+
+    # Add to serial port groups (Arch: uucp, Debian: dialout)
+    for group in uucp dialout tty; do
+        getent group "$group" &>/dev/null && usermod -aG "$group" ulog
+    done
 
     # Set config file permissions (root:ulog 0640)
     chown root:ulog /etc/ulog.conf
@@ -27,7 +31,11 @@ post_upgrade() {
     if ! getent passwd ulog &>/dev/null; then
         useradd -r -s /sbin/nologin -d /nonexistent -c "ulog service account" ulog
     fi
-    usermod -aG dialout ulog
+
+    # Add to serial port groups (Arch: uucp, Debian: dialout)
+    for group in uucp dialout tty; do
+        getent group "$group" &>/dev/null && usermod -aG "$group" ulog
+    done
 
     # Ensure config permissions
     chown root:ulog /etc/ulog.conf

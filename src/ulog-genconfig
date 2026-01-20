@@ -175,6 +175,17 @@ main() {
         device_allow+="DeviceAllow=${devices[$i]} rw\n"
     done
 
+    # Detect available serial port groups (Arch: uucp, Debian: dialout)
+    local serial_groups=""
+    for group in uucp dialout tty; do
+        if getent group "$group" &>/dev/null; then
+            [[ -n "$serial_groups" ]] && serial_groups+=" "
+            serial_groups+="$group"
+        fi
+    done
+    [[ -z "$serial_groups" ]] && serial_groups="dialout"  # fallback
+    log_info "Serial port groups: $serial_groups"
+
     # Generate systemd service
     local service_content
     read -r -d '' service_content << EOF || true
@@ -191,7 +202,7 @@ RestartSec=5
 # Security hardening
 User=ulog
 Group=ulog
-SupplementaryGroups=dialout
+SupplementaryGroups=${serial_groups}
 
 # Filesystem restrictions
 ProtectSystem=strict
