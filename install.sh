@@ -25,6 +25,7 @@ done
 echo "Installing ulog..."
 install -Dm755 src/ulog.sh /usr/bin/ulog
 install -Dm755 src/ulog-genconfig /usr/bin/ulog-genconfig
+install -Dm755 src/ulog-export /usr/bin/ulog-export
 
 # Config file: root owns, ulog group can read (0640)
 install -Dm640 -o root -g ulog src/ulog.conf /etc/ulog.conf
@@ -51,6 +52,10 @@ install -Dm644 services/ulog-rollover.timer /usr/lib/systemd/system/ulog-rollove
 
 # Create base log directory
 install -dm750 -o ulog -g ulog /var/log/ulog
+
+# Create state directory for session tracking
+install -dm750 -o ulog -g ulog /var/lib/ulog
+install -dm750 -o ulog -g ulog /var/lib/ulog/sessions
 
 echo "Generating initial config..."
 /usr/bin/ulog-genconfig

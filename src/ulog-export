@@ -1,0 +1,437 @@
+#!/bin/bash
+# ulog-export - Export and manage ulog sessions
+set -euo pipefail
+
+readonly LOG_BASE="/var/log/ulog"
+
+usage() {
+    cat << 'EOF'
+Usage: ulog-export [OPTIONS]
+
+List and export ulog sessions.
+
+Options:
+  --list                    List sessions (requires --device or --all)
+  --device DEVICE           Device name (e.g., ttyUSB0)
+  --session SESSION_ID      Export specific session(s), comma-separated for multiple
+  --identity IDENTITY       Export all sessions matching device identity (vendor:product:serial)
+  --output FILE             Output file (default: stdout)
+  --no-header               Omit export header in output
+  --all                     List sessions from all devices
+
+Examples:
+  # List all sessions for a device
+  ulog-export --list --device ttyUSB0
+
+  # List sessions from all devices
+  ulog-export --list --all
+
+  # Export specific session to file
+  ulog-export --session 20260118_143000_12345 --device ttyUSB0 --output session.log
+
+  # Export latest/current session
+  ulog-export --device ttyUSB0 --output latest.log
+
+  # Export multiple sessions combined
+  ulog-export --session 20260118_143000_12345,20260118_200000_67890 --device ttyUSB0 --output combined.log
+
+  # Export all sessions from a specific physical device
+  ulog-export --identity 0403:6001:A12345 --output all_ftdi.log
+EOF
+    exit "${1:-0}"
+}
+
+log_error() { echo "ulog-export: ERROR: $*" >&2; }
+log_info() { echo "ulog-export: $*" >&2; }
+
+# Parse session.index file and output session info
+# Format: session_id|start_time|end_time|identity|files
+list_sessions() {
+    local device="$1"
+    local index_file="$LOG_BASE/$device/session.index"
+
+    if [[ ! -f "$index_file" ]]; then
+        log_error "No session index found for $device"
+        return 1
+    fi
+
+    printf "%-25s %-25s %-10s %-25s %s\n" "SESSION_ID" "START_TIME" "STATUS" "IDENTITY" "FILES"
+    printf "%s\n" "$(printf '=%.0s' {1..120})"
+
+    while IFS='|' read -r session_id start_time end_time identity files || [[ -n "$session_id" ]]; do
+        [[ -z "$session_id" || "$session_id" =~ ^# ]] && continue
+
+        local status="$end_time"
+        local file_count
+        file_count=$(echo "$files" | tr ',' '\n' | wc -l)
+
+        printf "%-25s %-25s %-10s %-25s %d file(s)\n" "$session_id" "$start_time" "$status" "$identity" "$file_count"
+    done < "$index_file"
+}
+
+# List sessions from all devices
+list_all_sessions() {
+    local found_any=false
+
+    for device_dir in "$LOG_BASE"/*/; do
+        [[ -d "$device_dir" ]] || continue
+        local device
+        device=$(basename "$device_dir")
+        local index_file="$device_dir/session.index"
+
+        [[ -f "$index_file" ]] || continue
+
+        if [[ "$found_any" == "true" ]]; then
+            echo ""
+        fi
+        echo "=== Device: $device ==="
+        list_sessions "$device"
+        found_any=true
+    done
+
+    if [[ "$found_any" == "false" ]]; then
+        log_error "No sessions found in any device"
+        return 1
+    fi
+}
+
+# Get session info from index
+get_session_info() {
+    local device="$1"
+    local session_id="$2"
+    local index_file="$LOG_BASE/$device/session.index"
+
+    if [[ ! -f "$index_file" ]]; then
+        return 1
+    fi
+
+    grep "^${session_id}|" "$index_file" 2>/dev/null || return 1
+}
+
+# Get latest session ID for a device
+get_latest_session() {
+    local device="$1"
+    local index_file="$LOG_BASE/$device/session.index"
+
+    if [[ ! -f "$index_file" ]]; then
+        return 1
+    fi
+
+    # Get the last non-comment line
+    grep -v '^#' "$index_file" | tail -1 | cut -d'|' -f1
+}
+
+# Find sessions by identity
+find_sessions_by_identity() {
+    local identity="$1"
+    local found_sessions=()
+
+    for device_dir in "$LOG_BASE"/*/; do
+        [[ -d "$device_dir" ]] || continue
+        local device
+        device=$(basename "$device_dir")
+        local index_file="$device_dir/session.index"
+
+        [[ -f "$index_file" ]] || continue
+
+        while IFS='|' read -r session_id start_time end_time sess_identity files || [[ -n "$session_id" ]]; do
+            [[ -z "$session_id" || "$session_id" =~ ^# ]] && continue
+            if [[ "$sess_identity" == "$identity" ]]; then
+                found_sessions+=("$device:$session_id")
+            fi
+        done < "$index_file"
+    done
+
+    if [[ ${#found_sessions[@]} -eq 0 ]]; then
+        return 1
+    fi
+
+    printf '%s\n' "${found_sessions[@]}"
+}
+
+# Calculate duration between two timestamps
+calc_duration() {
+    local start="$1"
+    local end="$2"
+
+    if [[ "$end" == "ongoing" ]]; then
+        end=$(date -Iseconds)
+    fi
+
+    local start_epoch end_epoch
+    start_epoch=$(date -d "$start" +%s 2>/dev/null || echo 0)
+    end_epoch=$(date -d "$end" +%s 2>/dev/null || echo 0)
+
+    local diff=$((end_epoch - start_epoch))
+    if [[ $diff -lt 0 ]]; then
+        echo "unknown"
+        return
+    fi
+
+    local hours=$((diff / 3600))
+    local mins=$(((diff % 3600) / 60))
+    local secs=$((diff % 60))
+
+    printf "%dh %dm %ds" "$hours" "$mins" "$secs"
+}
+
+# Export session(s) to output
+export_sessions() {
+    local device="$1"
+    local session_ids="$2"
+    local output="$3"
+    local no_header="$4"
+
+    local log_dir="$LOG_BASE/$device"
+
+    # Handle multiple session IDs
+    IFS=',' read -ra sessions <<< "$session_ids"
+
+    local all_files=()
+    local first_start=""
+    local last_end=""
+    local identity=""
+    local total_files=0
+
+    for session_id in "${sessions[@]}"; do
+        local session_info
+        session_info=$(get_session_info "$device" "$session_id")
+        if [[ -z "$session_info" ]]; then
+            log_error "Session not found: $session_id"
+            return 1
+        fi
+
+        local start_time end_time sess_identity files
+        IFS='|' read -r _ start_time end_time sess_identity files <<< "$session_info"
+
+        if [[ -z "$first_start" ]] || [[ "$start_time" < "$first_start" ]]; then
+            first_start="$start_time"
+        fi
+        if [[ "$end_time" != "ongoing" ]]; then
+            if [[ -z "$last_end" ]] || [[ "$end_time" > "$last_end" ]]; then
+                last_end="$end_time"
+            fi
+        else
+            last_end="ongoing"
+        fi
+
+        identity="$sess_identity"
+
+        IFS=',' read -ra file_list <<< "$files"
+        for f in "${file_list[@]}"; do
+            all_files+=("$log_dir/$f")
+            ((total_files++))
+        done
+    done
+
+    # Prepare output
+    local output_fd=1
+    if [[ -n "$output" ]]; then
+        exec 3>"$output"
+        output_fd=3
+    fi
+
+    # Write header unless disabled
+    if [[ "$no_header" != "true" ]]; then
+        local duration
+        duration=$(calc_duration "$first_start" "$last_end")
+
+        cat >&$output_fd << EOF
+================================================================================
+ULOG SESSION EXPORT
+================================================================================
+Session ID:    $session_ids
+Device:        /dev/$device
+Identity:      $identity
+Started:       $first_start
+Ended:         $last_end
+Duration:      $duration
+Files:         $total_files
+================================================================================
+
+EOF
+    fi
+
+    # Concatenate log files, stripping header lines
+    for log_file in "${all_files[@]}"; do
+        if [[ -f "$log_file" ]]; then
+            # Skip lines starting with # (header lines)
+            grep -v '^#' "$log_file" 2>/dev/null >&$output_fd || true
+        else
+            log_error "Log file not found: $log_file" >&2
+        fi
+    done
+
+    if [[ -n "$output" ]]; then
+        exec 3>&-
+        log_info "Exported to $output"
+    fi
+}
+
+# Export by identity (all sessions from a specific physical device)
+export_by_identity() {
+    local identity="$1"
+    local output="$2"
+    local no_header="$3"
+
+    local sessions
+    sessions=$(find_sessions_by_identity "$identity")
+    if [[ -z "$sessions" ]]; then
+        log_error "No sessions found with identity: $identity"
+        return 1
+    fi
+
+    # Group sessions by device
+    declare -A device_sessions
+    while IFS=':' read -r device session_id; do
+        if [[ -n "${device_sessions[$device]:-}" ]]; then
+            device_sessions[$device]="${device_sessions[$device]},$session_id"
+        else
+            device_sessions[$device]="$session_id"
+        fi
+    done <<< "$sessions"
+
+    # Export from each device
+    local first=true
+    local output_fd=1
+    if [[ -n "$output" ]]; then
+        exec 3>"$output"
+        output_fd=3
+    fi
+
+    for device in "${!device_sessions[@]}"; do
+        if [[ "$first" != "true" ]]; then
+            echo "" >&$output_fd
+        fi
+        first=false
+
+        # Export with a sub-header for this device
+        if [[ "$no_header" != "true" ]]; then
+            echo "### Device: $device ###" >&$output_fd
+        fi
+
+        local session_ids="${device_sessions[$device]}"
+        local log_dir="$LOG_BASE/$device"
+
+        IFS=',' read -ra sess_array <<< "$session_ids"
+        for session_id in "${sess_array[@]}"; do
+            local session_info
+            session_info=$(get_session_info "$device" "$session_id")
+            [[ -z "$session_info" ]] && continue
+
+            local files
+            files=$(echo "$session_info" | cut -d'|' -f5)
+
+            IFS=',' read -ra file_list <<< "$files"
+            for f in "${file_list[@]}"; do
+                local log_file="$log_dir/$f"
+                if [[ -f "$log_file" ]]; then
+                    grep -v '^#' "$log_file" 2>/dev/null >&$output_fd || true
+                fi
+            done
+        done
+    done
+
+    if [[ -n "$output" ]]; then
+        exec 3>&-
+        log_info "Exported to $output"
+    fi
+}
+
+main() {
+    local list_mode=false
+    local device=""
+    local session_id=""
+    local identity=""
+    local output=""
+    local no_header=false
+    local all_devices=false
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --list)
+                list_mode=true
+                shift
+                ;;
+            --device)
+                device="$2"
+                shift 2
+                ;;
+            --session)
+                session_id="$2"
+                shift 2
+                ;;
+            --identity)
+                identity="$2"
+                shift 2
+                ;;
+            --output)
+                output="$2"
+                shift 2
+                ;;
+            --no-header)
+                no_header=true
+                shift
+                ;;
+            --all)
+                all_devices=true
+                shift
+                ;;
+            -h|--help)
+                usage 0
+                ;;
+            *)
+                log_error "Unknown option: $1"
+                usage 1
+                ;;
+        esac
+    done
+
+    # List mode
+    if [[ "$list_mode" == "true" ]]; then
+        if [[ "$all_devices" == "true" ]]; then
+            list_all_sessions
+        elif [[ -n "$device" ]]; then
+            list_sessions "$device"
+        else
+            log_error "--list requires --device or --all"
+            usage 1
+        fi
+        return
+    fi
+
+    # Export by identity
+    if [[ -n "$identity" ]]; then
+        export_by_identity "$identity" "$output" "$no_header"
+        return
+    fi
+
+    # Export specific session(s)
+    if [[ -n "$session_id" ]]; then
+        if [[ -z "$device" ]]; then
+            log_error "--session requires --device"
+            usage 1
+        fi
+        export_sessions "$device" "$session_id" "$output" "$no_header"
+        return
+    fi
+
+    # Export latest session for device
+    if [[ -n "$device" ]]; then
+        local latest
+        latest=$(get_latest_session "$device")
+        if [[ -z "$latest" ]]; then
+            log_error "No sessions found for $device"
+            return 1
+        fi
+        log_info "Exporting latest session: $latest"
+        export_sessions "$device" "$latest" "$output" "$no_header"
+        return
+    fi
+
+    # No valid operation specified
+    log_error "No operation specified"
+    usage 1
+}
+
+main "$@"

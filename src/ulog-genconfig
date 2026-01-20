@@ -175,7 +175,7 @@ main() {
     fi
 
     # Build ReadWritePaths and DeviceAllow for systemd
-    local read_write_paths=""
+    local read_write_paths="/var/lib/ulog "
     local device_allow=""
     for i in "${!devices[@]}"; do
         read_write_paths+="${log_dirs[$i]} "
@@ -256,6 +256,12 @@ EOF
 
     atomic_write "/etc/udev/rules.d/99-ulog.rules" "$(echo -e "$udev_content")"
     log_info "Generated: /etc/udev/rules.d/99-ulog.rules"
+
+    # Create state directory for session tracking
+    mkdir -p /var/lib/ulog/sessions
+    chown ulog:ulog /var/lib/ulog /var/lib/ulog/sessions
+    chmod 0750 /var/lib/ulog /var/lib/ulog/sessions
+    log_info "Created: /var/lib/ulog/sessions"
 
     # Create log directories
     for log_dir in "${log_dirs[@]}"; do
