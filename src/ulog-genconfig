@@ -175,10 +175,10 @@ main() {
     fi
 
     # Build ReadWritePaths and DeviceAllow for systemd
-    local read_write_paths="/var/lib/ulog "
+    # Use base log directory so subdirs can be created dynamically
+    local read_write_paths="/var/lib/ulog /var/log/ulog"
     local device_allow=""
     for i in "${!devices[@]}"; do
-        read_write_paths+="${log_dirs[$i]} "
         device_allow+="DeviceAllow=${devices[$i]} rw\n"
     done
 
