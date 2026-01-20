@@ -19,6 +19,11 @@ if [ "$1" = "configure" ]; then
     chown root:ulog /etc/ulog.conf
     chmod 0640 /etc/ulog.conf
 
+    # Create state directory for session tracking
+    mkdir -p /var/lib/ulog/sessions
+    chown ulog:ulog /var/lib/ulog /var/lib/ulog/sessions
+    chmod 0750 /var/lib/ulog /var/lib/ulog/sessions
+
     # Generate initial config (creates service file and udev rule)
     /usr/bin/ulog-genconfig
 
