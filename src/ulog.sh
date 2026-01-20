@@ -139,6 +139,49 @@ validate_log_dir() {
     return 0
 }
 
+# Wait for device to be ready (race condition fix on boot)
+wait_for_device() {
+    local device="$1"
+    local max_attempts=20
+    local attempt=0
+
+    log_info "Waiting for device to be ready: $device"
+
+    while [[ $attempt -lt $max_attempts ]]; do
+        if [[ -c "$device" ]] && stty -F "$device" &>/dev/null; then
+            log_info "Device ready after $attempt attempts"
+            return 0
+        fi
+        sleep 0.5
+        ((attempt++))
+    done
+
+    log_error "Device not ready after ${max_attempts} attempts: $device"
+    return 1
+}
+
+# Initialize serial port settings
+init_serial() {
+    local device="$1"
+    local baud="$2"
+
+    log_info "Initializing serial port: $device at $baud baud"
+
+    # Reset serial port to known state
+    if ! stty -F "$device" "$baud" raw -echo -echoe -echok -echoctl -echonl \
+         -icanon -iexten -isig -brkint -icrnl -ignbrk -igncr -inlcr \
+         -inpck -istrip -ixon -ixoff -parmrk -opost cs8 cread clocal -crtscts \
+         min 1 time 0 2>/dev/null; then
+        log_error "Failed to initialize serial port: $device"
+        return 1
+    fi
+
+    # Small delay to let settings take effect
+    sleep 0.2
+
+    return 0
+}
+
 # Safe log file creation
 create_log_file() {
     local log_dir="$1"
@@ -185,11 +228,11 @@ main() {
     validate_baud "$baud" || exit 1
     validate_log_dir "$log_dir" || exit 1
 
-    # Check device exists before starting
-    if [[ ! -c "$device" ]]; then
-        log_error "Device not found or not a character device: $device"
-        exit 1
-    fi
+    # Wait for device to be ready (handles boot race condition)
+    wait_for_device "$device" || exit 1
+
+    # Initialize serial port to known state
+    init_serial "$device" "$baud" || exit 1
 
     # Create log file safely
     local today logfile
