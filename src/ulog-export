@@ -272,23 +272,20 @@ export_sessions() {
         IFS=',' read -ra file_list <<< "$files"
         for f in "${file_list[@]}"; do
             all_files+=("$log_dir/$f")
-            ((total_files++))
+            ((++total_files))
         done
     done
 
-    # Prepare output
-    local output_fd=1
-    if [[ -n "$output" ]]; then
-        exec 3>"$output"
-        output_fd=3
-    fi
+    # Determine output destination
+    local out_target="/dev/stdout"
+    [[ -n "$output" ]] && out_target="$output"
 
     # Write header unless disabled
     if [[ "$no_header" != "true" ]]; then
         local duration
         duration=$(calc_duration "$first_start" "$last_end")
 
-        cat >&$output_fd << EOF
+        cat > "$out_target" << EOF
 ================================================================================
 ULOG SESSION EXPORT
 ================================================================================
@@ -302,20 +299,22 @@ Files:         $total_files
 ================================================================================
 
 EOF
+    else
+        # Truncate/create file if no header
+        [[ -n "$output" ]] && : > "$out_target"
     fi
 
     # Concatenate log files, stripping header lines
     for log_file in "${all_files[@]}"; do
         if [[ -f "$log_file" ]]; then
             # Skip lines starting with # (header lines)
-            grep -v '^#' "$log_file" 2>/dev/null >&$output_fd || true
+            grep -v '^#' "$log_file" 2>/dev/null >> "$out_target" || true
         else
-            log_error "Log file not found: $log_file" >&2
+            log_error "Log file not found: $log_file"
         fi
     done
 
     if [[ -n "$output" ]]; then
-        exec 3>&-
         log_info "Exported to $output"
     fi
 }
@@ -349,23 +348,24 @@ export_by_filter() {
         fi
     done <<< "$sessions"
 
+    # Determine output destination
+    local out_target="/dev/stdout"
+    [[ -n "$output" ]] && out_target="$output"
+
+    # Truncate/create file
+    [[ -n "$output" ]] && : > "$out_target"
+
     # Export from each device
     local first=true
-    local output_fd=1
-    if [[ -n "$output" ]]; then
-        exec 3>"$output"
-        output_fd=3
-    fi
-
     for device in "${!device_sessions[@]}"; do
         if [[ "$first" != "true" ]]; then
-            echo "" >&$output_fd
+            echo "" >> "$out_target"
         fi
         first=false
 
         # Export with a sub-header for this device
         if [[ "$no_header" != "true" ]]; then
-            echo "### Device: $device ###" >&$output_fd
+            echo "### Device: $device ###" >> "$out_target"
         fi
 
         local session_ids="${device_sessions[$device]}"
@@ -384,14 +384,13 @@ export_by_filter() {
             for f in "${file_list[@]}"; do
                 local log_file="$log_dir/$f"
                 if [[ -f "$log_file" ]]; then
-                    grep -v '^#' "$log_file" 2>/dev/null >&$output_fd || true
+                    grep -v '^#' "$log_file" 2>/dev/null >> "$out_target" || true
                 fi
             done
         done
     done
 
     if [[ -n "$output" ]]; then
-        exec 3>&-
         log_info "Exported to $output"
     fi
 }
