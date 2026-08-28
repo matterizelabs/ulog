@@ -41,7 +41,7 @@ Before submitting:
 
 ```bash
 # Check shell scripts
-shellcheck ulog.sh ulog-genconfig install.sh
+shellcheck ulog.sh ulog-genconfig ulog-export ulog-common.sh install.sh uninstall.sh
 
 # Verify systemd units
 systemd-analyze verify ulog.service
@@ -53,7 +53,6 @@ systemd-analyze verify ulog-rollover.timer
 
 - Keep changes focused and minimal
 - Update README.md if adding features
-- Update version in PKGBUILD, debian/changelog, and .SRCINFO for releases
 
 ## License
 
