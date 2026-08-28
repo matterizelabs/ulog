@@ -201,11 +201,14 @@ write_session_header() {
 
 wait_for_device() {
     local device="$1"
+    local waited=0
     while true; do
         if [[ -c "$device" ]] && stty -F "$device" &>/dev/null; then
             return 0
         fi
+        (( waited % 30 == 0 )) && log_info "Waiting for device $device..."
         sleep 1
+        (( waited++ ))
     done
 }
 
