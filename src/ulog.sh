@@ -293,7 +293,7 @@ log_device_worker() {
     log_device "$name" "Logging to $logfile"
 
     socat -u "$device,b${baud},raw,echo=0,crtscts=0,clocal=1" STDOUT \
-        > >(ts '%b %d %H:%M:%S' >> "$logfile") &
+        > >(stdbuf -oL ts '%b %d %H:%M:%S' >> "$logfile") &
     local socat_pid=$!
 
     trap 'kill "$socat_pid" 2>/dev/null' SIGTERM SIGINT
