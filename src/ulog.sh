@@ -378,12 +378,6 @@ main() {
                 continue
             fi
 
-            if [[ -z "$log_dir" ]]; then
-                local dev_name
-                dev_name=$(basename "$device")
-                log_dir="/var/log/ulog/$dev_name"
-            fi
-
             local name
             name=$(basename "$config" .conf)
 
@@ -401,8 +395,6 @@ main() {
             local log_dir="$PARSED_LOG_DIR"
 
             if [[ -n "$device" ]]; then
-                [[ -z "$log_dir" ]] && log_dir="/var/log/ulog/$(basename "$device")"
-
                 launch_worker "default" "$device" "$baud" "$log_dir"
                 ((device_count++))
             fi
