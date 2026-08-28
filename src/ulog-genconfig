@@ -161,9 +161,7 @@ ProtectKernelLogs=yes
 ProtectControlGroups=yes
 
 # Other restrictions
-RestrictAddressFamilies=AF_UNIX
 RestrictRealtime=yes
-MemoryDenyWriteExecute=yes
 LockPersonality=yes
 RestrictSUIDSGID=yes
 RemoveIPC=yes
