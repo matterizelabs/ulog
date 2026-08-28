@@ -5,8 +5,7 @@ ULOG_BIN_DIR="${ULOG_BIN_DIR:-/usr/bin}"
 ULOG_LIB_DIR="${ULOG_LIB_DIR:-/usr/lib/ulog}"
 ULOG_ETC_DIR="${ULOG_ETC_DIR:-/etc}"
 ULOG_CHECKSUMS="${ULOG_CHECKSUMS:-}"
-ULOG_VERSION="${ULOG_VERSION:-v1.1.3}"
-ULOG_RAW="${ULOG_RAW:-https://raw.githubusercontent.com/matterizelabs/ulog/$ULOG_VERSION}"
+ULOG_VERSION="${ULOG_VERSION:-}"
 
 red()    { printf '\033[0;31m%s\033[0m\n' "$*"; }
 green()  { printf '\033[0;32m%s\033[0m\n' "$*"; }
@@ -31,8 +30,14 @@ for c in socat ts realpath; do
 done
 
 if [[ ! -f "$SRC_DIR/src/ulog.sh" ]]; then
-    info "Fetching ulog $ULOG_VERSION..."
+    info "Fetching ulog ${ULOG_VERSION:-latest}..."
     command -v curl &>/dev/null || die "curl is required"
+    if [[ -z "$ULOG_VERSION" ]]; then
+        ULOG_VERSION="$(curl -fsSL https://api.github.com/repos/matterizelabs/ulog/releases/latest | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)"
+        [[ -n "$ULOG_VERSION" ]] || die "failed to determine latest release"
+        info "Latest release: $ULOG_VERSION"
+    fi
+    ULOG_RAW="https://raw.githubusercontent.com/matterizelabs/ulog/$ULOG_VERSION"
     SRC_DIR="$(mktemp -d)"
     trap 'rm -rf "$SRC_DIR"' EXIT
     for f in src/ulog.sh src/ulog-genconfig src/ulog-export src/ulog-common.sh src/ulog.conf \

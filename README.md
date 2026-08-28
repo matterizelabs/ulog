@@ -27,10 +27,16 @@ dependencies listed below.
 
 ## Installation
 
-One-line install (fetches sources pinned to a release tag):
+One-line install (defaults to the latest release):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/matterizelabs/ulog/v1.1.3/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/matterizelabs/ulog/main/install.sh | sudo bash
+```
+
+Pin a specific release:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/matterizelabs/ulog/main/install.sh | sudo ULOG_VERSION=v1.1.3 bash
 ```
 
 Or from a checkout:
