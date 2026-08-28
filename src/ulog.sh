@@ -227,20 +227,14 @@ write_session_header() {
 }
 
 
-# Wait for device to be ready
 wait_for_device() {
     local device="$1"
-    local max_attempts=20
-    local attempt=0
-
-    while [[ $attempt -lt $max_attempts ]]; do
+    while true; do
         if [[ -c "$device" ]] && stty -F "$device" &>/dev/null; then
             return 0
         fi
-        sleep 0.5
-        ((attempt++))
+        sleep 1
     done
-    return 1
 }
 
 # Create log file safely
