@@ -128,7 +128,6 @@ store_log_dir() {
     echo "$log_dir" > "$STATE_DIR/${dev_name}.logdir"
 }
 
-# Mark session as ended in session.index
 end_session() {
     local dev_name="$1"
     local session_file="$STATE_DIR/${dev_name}.session"
@@ -145,24 +144,26 @@ end_session() {
 
     [[ -f "$index_file" ]] || return 0
 
-    # Update the session entry to replace "ongoing" with actual end time
     local tmp_file
     tmp_file=$(mktemp)
-    while IFS='|' read -r sid stime etime ident files || [[ -n "$sid" ]]; do
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        if [[ "$line" =~ ^# ]]; then
+            echo "$line" >> "$tmp_file"
+            continue
+        fi
+        IFS='|' read -r sid stime etime ident files <<< "$line"
         if [[ "$sid" == "$session_id" ]]; then
             echo "${sid}|${stime}|${end_time}|${ident}|${files}" >> "$tmp_file"
         else
-            echo "${sid}${stime:+|$stime}${etime:+|$etime}${ident:+|$ident}${files:+|$files}" >> "$tmp_file"
+            echo "$line" >> "$tmp_file"
         fi
     done < "$index_file"
     mv "$tmp_file" "$index_file"
     chmod 0640 "$index_file"
 
-    # Clean up state files
     rm -f "$session_file" "$logdir_file"
 }
 
-# Update session index file with new log file entry
 update_session_index() {
     local log_dir="$1"
     local session_id="$2"
@@ -170,34 +171,26 @@ update_session_index() {
     local identity="$4"
     local log_file="$5"
     local index_file="$log_dir/session.index"
-
-    # Calculate relative path from log_dir
     local rel_path="${log_file#$log_dir/}"
 
-    # Check if session already exists in index
     if [[ -f "$index_file" ]] && grep -q "^${session_id}|" "$index_file"; then
-        # Append file to existing session entry
-        # Format: session_id|start_time|end_time|identity|file1,file2,...
         local tmp_file
         tmp_file=$(mktemp)
-        while IFS='|' read -r sid stime etime ident files || [[ -n "$sid" ]]; do
-            [[ -z "$sid" || "$sid" =~ ^# ]] && { echo "$sid${stime:+|$stime}${etime:+|$etime}${ident:+|$ident}${files:+|$files}" >> "$tmp_file"; continue; }
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            if [[ "$line" =~ ^# ]]; then
+                echo "$line" >> "$tmp_file"
+                continue
+            fi
+            IFS='|' read -r sid stime etime ident files <<< "$line"
             if [[ "$sid" == "$session_id" ]]; then
-                # Check if file already in list
-                if [[ ! ",$files," == *",$rel_path,"* ]]; then
-                    files="${files},${rel_path}"
-                fi
-                echo "${sid}|${stime}|ongoing|${ident}|${files}" >> "$tmp_file"
+                echo "${sid}|${stime}|ongoing|${ident}|${rel_path}" >> "$tmp_file"
             else
-                echo "${sid}|${stime}|${etime}|${ident}|${files}" >> "$tmp_file"
+                echo "$line" >> "$tmp_file"
             fi
         done < "$index_file"
         mv "$tmp_file" "$index_file"
     else
-        # Create new session entry
-        if [[ ! -f "$index_file" ]]; then
-            echo "# session_id|start_time|end_time|device_identity|files" > "$index_file"
-        fi
+        [[ ! -f "$index_file" ]] && echo "# session_id|start_time|end_time|device_identity|files" > "$index_file"
         echo "${session_id}|${start_time}|ongoing|${identity}|${rel_path}" >> "$index_file"
     fi
 
