@@ -202,6 +202,7 @@ EOF
 
     udevadm control --reload-rules
     systemctl daemon-reload
+    systemctl try-restart ulog.service
 
     log_info "Configuration complete for ${#devices[@]} device(s)"
 }
