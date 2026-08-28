@@ -12,6 +12,8 @@ source "$_ulog_common"
 
 declare -a CHILD_PIDS=()
 declare -a DEV_NAMES=() DEVICES=() BAUDS=() LOG_DIRS=()
+declare -a FAIL_COUNT=() WORKER_START=()
+readonly RESPAWN_BASE=5 RESPAWN_MAX=300 RESPAWN_RESET=60
 
 log_error() { echo "ulog: ERROR: $*" >&2; }
 log_info() { echo "ulog: $*"; }
@@ -314,6 +316,8 @@ launch_worker() {
     DEVICES+=("$device")
     BAUDS+=("$baud")
     LOG_DIRS+=("$log_dir")
+    FAIL_COUNT+=(0)
+    WORKER_START+=("$(date +%s)")
     log_info "Started logger for $device (PID: $pid)"
 }
 
@@ -407,10 +411,21 @@ main() {
         for i in "${!CHILD_PIDS[@]}"; do
             pid="${CHILD_PIDS[$i]}"
             if ! kill -0 "$pid" 2>/dev/null; then
-                log_info "Logger for ${DEVICES[$i]} exited, restarting"
+                local now elapsed fc backoff
+                now=$(date +%s)
+                elapsed=$(( now - ${WORKER_START[$i]:-0} ))
+                fc=${FAIL_COUNT[$i]:-0}
+                (( elapsed >= RESPAWN_RESET )) && fc=0
+                fc=$(( fc + 1 ))
+                backoff=$(( RESPAWN_BASE * 2 ** (fc - 1) ))
+                (( backoff > RESPAWN_MAX )) && backoff=$RESPAWN_MAX
+                log_info "Logger for ${DEVICES[$i]} exited (attempt $fc), restarting in ${backoff}s"
+                sleep "$backoff"
                 log_device_worker "${DEV_NAMES[$i]}" "${DEVICES[$i]}" \
                     "${BAUDS[$i]}" "${LOG_DIRS[$i]}" &
                 CHILD_PIDS[$i]=$!
+                WORKER_START[$i]=$(date +%s)
+                FAIL_COUNT[$i]=0
             fi
         done
         sleep 5
