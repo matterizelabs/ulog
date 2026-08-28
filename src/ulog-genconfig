@@ -32,7 +32,6 @@ main() {
 
     declare -a devices=()
     declare -a dev_names=()
-    declare -a log_dirs=()
 
     if [[ -d "$CONFIG_DIR" ]]; then
         for config in "$CONFIG_DIR"/*.conf; do
@@ -77,7 +76,6 @@ main() {
 
             devices+=("$device")
             dev_names+=("$dev_name")
-            log_dirs+=("$log_dir")
 
             log_info "Found device: $device -> $log_dir"
         done
@@ -99,7 +97,6 @@ main() {
                 if validate_log_dir "$log_dir"; then
                     devices+=("$device")
                     dev_names+=("$dev_name")
-                    log_dirs+=("$log_dir")
                     log_info "Found device: $device -> $log_dir"
                 fi
             fi
@@ -186,12 +183,10 @@ EOF
     chmod 0750 /var/lib/ulog /var/lib/ulog/sessions
     log_info "Created: /var/lib/ulog/sessions"
 
-    for log_dir in "${log_dirs[@]}"; do
-        mkdir -p "$log_dir"
-        chown ulog:ulog "$log_dir"
-        chmod 0750 "$log_dir"
-        log_info "Created: $log_dir"
-    done
+    mkdir -p /var/log/ulog
+    chown ulog:ulog /var/log/ulog
+    chmod 0750 /var/log/ulog
+    log_info "Created: /var/log/ulog"
 
     udevadm control --reload-rules
     systemctl daemon-reload

@@ -87,9 +87,9 @@ generate_session_id() {
 }
 
 get_session_id() {
-    local dev_name="$1"
+    local key="$1"
     local force_new="${2:-false}"
-    local session_file="$STATE_DIR/${dev_name}.session"
+    local session_file="$STATE_DIR/${key}.session"
 
     if [[ "$force_new" == "true" ]] || [[ ! -f "$session_file" ]]; then
         local session_id
@@ -103,16 +103,16 @@ get_session_id() {
 }
 
 store_log_dir() {
-    local dev_name="$1"
+    local key="$1"
     local log_dir="$2"
     mkdir -p "$STATE_DIR"
-    echo "$log_dir" > "$STATE_DIR/${dev_name}.logdir"
+    echo "$log_dir" > "$STATE_DIR/${key}.logdir"
 }
 
 end_session() {
-    local dev_name="$1"
-    local session_file="$STATE_DIR/${dev_name}.session"
-    local logdir_file="$STATE_DIR/${dev_name}.logdir"
+    local key="$1"
+    local session_file="$STATE_DIR/${key}.session"
+    local logdir_file="$STATE_DIR/${key}.logdir"
 
     [[ -f "$session_file" ]] || return 0
     [[ -f "$logdir_file" ]] || return 0
@@ -248,10 +248,6 @@ log_device_worker() {
         log_device_error "$name" "Invalid baud rate: $baud"
         return 1
     fi
-    if ! validate_log_dir "$log_dir"; then
-        log_device_error "$name" "Invalid log directory: $log_dir"
-        return 1
-    fi
 
     log_device "$name" "Waiting for device..."
     if ! wait_for_device "$device"; then
@@ -259,11 +255,21 @@ log_device_worker() {
         return 1
     fi
 
-    local dev_name identity session_id session_start force_new_session
+    local dev_name identity session_id session_start force_new_session key final_log_dir
     dev_name=$(basename "$device")
     identity=$(get_device_identity "$device")
     session_start=$(date -Iseconds)
     force_new_session="false"
+
+    key=$(identity_slug "$identity" "$dev_name")
+    final_log_dir="$log_dir"
+    if [[ -z "$final_log_dir" ]]; then
+        final_log_dir="/var/log/ulog/$key"
+    fi
+    if ! validate_log_dir "$final_log_dir"; then
+        log_device_error "$name" "Invalid log directory: $final_log_dir"
+        return 1
+    fi
 
     log_device "$name" "Device identity: $(format_identity "$identity")"
 
@@ -279,12 +285,12 @@ log_device_worker() {
         force_new_session="true"
     fi
 
-    session_id=$(get_session_id "$dev_name" "$force_new_session")
+    session_id=$(get_session_id "$key" "$force_new_session")
     log_device "$name" "Session ID: $session_id"
 
     local today logfile
     today=$(date +%Y-%m-%d)
-    logfile=$(create_log_file "$log_dir" "$today")
+    logfile=$(create_log_file "$final_log_dir" "$today")
     if [[ -z "$logfile" ]]; then
         log_device_error "$name" "Failed to create log file"
         return 1
@@ -292,8 +298,8 @@ log_device_worker() {
 
     write_session_header "$logfile" "$session_id" "$session_start" "$device" "$identity"
 
-    update_session_index "$log_dir" "$session_id" "$session_start" "$identity" "$logfile"
-    store_log_dir "$dev_name" "$log_dir"
+    update_session_index "$final_log_dir" "$session_id" "$session_start" "$identity" "$logfile"
+    store_log_dir "$key" "$final_log_dir"
 
     log_device "$name" "Logging to $logfile"
 
@@ -306,7 +312,7 @@ log_device_worker() {
     wait "$socat_pid"
     local rc=$?
 
-    end_session "$dev_name"
+    end_session "$key"
     return $rc
 }
 

@@ -83,3 +83,18 @@ format_identity() {
     fi
     echo "${vendor}:${product}:${serial}"
 }
+
+identity_slug() {
+    local identity="$1"
+    local fallback="$2"
+    local vendor product serial
+    IFS=':' read -r vendor product serial <<< "$identity"
+    if [[ -z "$vendor" || "$vendor" == "unknown" || -z "$product" || "$product" == "unknown" ]]; then
+        echo "$fallback"
+        return
+    fi
+    local slug="${vendor}-${product}"
+    [[ -n "$serial" && "$serial" != "unknown" ]] && slug="${slug}-${serial}"
+    slug=$(echo "$slug" | tr -c 'A-Za-z0-9._-' '_' | tr -s '_' | sed 's/^_//;s/_$//')
+    echo "$slug"
+}
