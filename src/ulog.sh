@@ -92,7 +92,7 @@ store_device_identity() {
 # Generate a new session ID (short format: MMDD-HHMM-xxxx)
 generate_session_id() {
     local rand
-    rand=$(head -c 4 /dev/urandom | od -An -tx1 | tr -d ' \n' | head -c 4)
+    rand=$(od -An -N2 -tx1 /dev/urandom | tr -d '[:space:]')
     echo "$(date +%m%d-%H%M)-${rand}"
 }
 
