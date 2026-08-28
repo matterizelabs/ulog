@@ -1,0 +1,93 @@
+#!/bin/bash
+# ulog-common - shared helpers for ulog scripts
+# Sourced by ulog, ulog-genconfig and ulog-export.
+# Defines parsing and validation used across all three so the logic lives
+# in exactly one place.
+
+readonly VALID_BAUDS=(300 1200 2400 4800 9600 19200 38400 57600 115200 230400 460800 921600)
+
+# Safe config parser - sets PARSED_DEVICE, PARSED_BAUD, PARSED_LOG_DIR
+# Requires log_error to be defined by the sourcing script.
+parse_config() {
+    local config_file="$1"
+
+    PARSED_DEVICE=""
+    PARSED_BAUD=""
+    PARSED_LOG_DIR=""
+
+    if [[ ! -f "$config_file" ]]; then
+        log_error "Config file not found: $config_file"
+        return 1
+    fi
+
+    local file_owner file_perms
+    file_owner=$(stat -c %u "$config_file")
+    file_perms=$(stat -c %a "$config_file")
+
+    if [[ "$file_owner" != "0" ]]; then
+        log_error "Config file must be owned by root: $config_file"
+        return 1
+    fi
+
+    if [[ "${file_perms: -1}" != "0" ]]; then
+        log_error "Config file must not be world-accessible (expected 0640): $config_file"
+        return 1
+    fi
+
+    while IFS='=' read -r key value || [[ -n "$key" ]]; do
+        [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
+        key=$(echo "$key" | xargs)
+        value=$(echo "$value" | xargs)
+
+        case "$key" in
+            DEVICE)  PARSED_DEVICE="$value" ;;
+            BAUD)    PARSED_BAUD="$value" ;;
+            LOG_DIR) PARSED_LOG_DIR="$value" ;;
+        esac
+    done < "$config_file"
+}
+
+validate_device() {
+    local device="$1"
+    [[ "$device" =~ ^/dev/tty[A-Za-z]+[0-9]*$ ]] || return 1
+    [[ ! "$device" =~ [!\"\'\`\$\(\)\{\}\[\]\|\;\&\<\>] ]] || return 1
+    return 0
+}
+
+validate_dev_name() {
+    local dev_name="$1"
+    [[ "$dev_name" =~ ^tty[A-Za-z]+[0-9]*$ ]] || return 1
+    [[ ! "$dev_name" =~ [\"\'\`\$\(\)\{\}\[\]\|\;\&\<\>\,\=] ]] || return 1
+    return 0
+}
+
+validate_baud() {
+    local baud="$1"
+    [[ "$baud" =~ ^[0-9]+$ ]] || return 1
+    for valid_baud in "${VALID_BAUDS[@]}"; do
+        [[ "$baud" == "$valid_baud" ]] && return 0
+    done
+    return 1
+}
+
+validate_log_dir() {
+    local log_dir="$1"
+    [[ "$log_dir" =~ ^/ ]] || return 1
+    [[ ! "$log_dir" =~ \.\. ]] || return 1
+    [[ "$log_dir" =~ ^/[a-zA-Z0-9/_-]+$ ]] || return 1
+    local canonical_dir
+    canonical_dir=$(realpath -m "$log_dir")
+    [[ "$canonical_dir" =~ ^/var/log/ ]] && return 0
+    return 1
+}
+
+# Format identity for display (truncate serial to 8 chars)
+format_identity() {
+    local identity="$1"
+    local vendor product serial
+    IFS=':' read -r vendor product serial <<< "$identity"
+    if [[ ${#serial} -gt 8 ]]; then
+        serial="${serial:0:8}"
+    fi
+    echo "${vendor}:${product}:${serial}"
+}

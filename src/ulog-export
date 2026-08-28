@@ -54,16 +54,11 @@ EOF
 log_error() { echo "ulog-export: ERROR: $*" >&2; }
 log_info() { echo "ulog-export: $*" >&2; }
 
-# Format identity for display (truncate serial to 8 chars)
-format_identity() {
-    local identity="$1"
-    local vendor product serial
-    IFS=':' read -r vendor product serial <<< "$identity"
-    if [[ ${#serial} -gt 8 ]]; then
-        serial="${serial:0:8}"
-    fi
-    echo "${vendor}:${product}:${serial}"
-}
+# Load shared helpers (format_identity, etc.)
+_ulog_common="/usr/lib/ulog/ulog-common.sh"
+[[ -f "$_ulog_common" ]] || _ulog_common="$(dirname "${BASH_SOURCE[0]}")/ulog-common.sh"
+# shellcheck source=/dev/null
+source "$_ulog_common"
 
 # Parse session.index file and output session info
 # Format: session_id|start_time|end_time|identity|files

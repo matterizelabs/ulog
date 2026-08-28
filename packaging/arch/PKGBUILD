@@ -17,6 +17,7 @@ package() {
     install -Dm755 src/ulog.sh "$pkgdir/usr/bin/ulog"
     install -Dm755 src/ulog-genconfig "$pkgdir/usr/bin/ulog-genconfig"
     install -Dm755 src/ulog-export "$pkgdir/usr/bin/ulog-export"
+    install -Dm644 src/ulog-common.sh "$pkgdir/usr/lib/ulog/ulog-common.sh"
     install -Dm644 src/ulog.conf "$pkgdir/etc/ulog.conf"
     install -Dm644 services/ulog-genconfig.path "$pkgdir/usr/lib/systemd/system/ulog-genconfig.path"
     install -Dm644 services/ulog-genconfig.service "$pkgdir/usr/lib/systemd/system/ulog-genconfig.service"

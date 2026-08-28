@@ -5,7 +5,12 @@ set -uo pipefail
 readonly CONFIG_FILE="/etc/ulog.conf"
 readonly CONFIG_DIR="/etc/ulog.d"
 readonly STATE_DIR="/var/lib/ulog/sessions"
-readonly VALID_BAUDS=(300 1200 2400 4800 9600 19200 38400 57600 115200 230400 460800 921600)
+
+# Load shared helpers (parse_config, validate_*, format_identity)
+_ulog_common="/usr/lib/ulog/ulog-common.sh"
+[[ -f "$_ulog_common" ]] || _ulog_common="$(dirname "${BASH_SOURCE[0]}")/ulog-common.sh"
+# shellcheck source=/dev/null
+source "$_ulog_common"
 
 # Track child PIDs for cleanup
 declare -a CHILD_PIDS=()
@@ -82,16 +87,6 @@ store_device_identity() {
     echo "$identity" > "$identity_file"
 }
 
-# Format identity for display (truncate serial to 8 chars)
-format_identity() {
-    local identity="$1"
-    local vendor product serial
-    IFS=':' read -r vendor product serial <<< "$identity"
-    if [[ ${#serial} -gt 8 ]]; then
-        serial="${serial:0:8}"
-    fi
-    echo "${vendor}:${product}:${serial}"
-}
 
 # Generate a new session ID (short format: MMDD-HHMM-xxxx)
 generate_session_id() {
@@ -230,83 +225,6 @@ write_session_header() {
     } >> "$log_file"
 }
 
-# Parse config file safely - sets PARSED_DEVICE, PARSED_BAUD, PARSED_LOG_DIR
-parse_config() {
-    local config_file="$1"
-
-    # Reset parsed values
-    PARSED_DEVICE=""
-    PARSED_BAUD=""
-    PARSED_LOG_DIR=""
-
-    if [[ ! -f "$config_file" ]]; then
-        log_error "Config file not found: $config_file"
-        return 1
-    fi
-
-    local file_owner file_perms
-    file_owner=$(stat -c %u "$config_file")
-    file_perms=$(stat -c %a "$config_file")
-
-    if [[ "$file_owner" != "0" ]]; then
-        log_error "Config file must be owned by root: $config_file"
-        return 1
-    fi
-
-    if [[ "${file_perms: -1}" != "0" ]]; then
-        log_error "Config file must not be world-accessible (expected 0640): $config_file"
-        return 1
-    fi
-
-    while IFS='=' read -r key value || [[ -n "$key" ]]; do
-        [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
-        key=$(echo "$key" | xargs)
-        value=$(echo "$value" | xargs)
-
-        case "$key" in
-            DEVICE)  PARSED_DEVICE="$value" ;;
-            BAUD)    PARSED_BAUD="$value" ;;
-            LOG_DIR) PARSED_LOG_DIR="$value" ;;
-        esac
-    done < "$config_file"
-}
-
-# Validation functions
-validate_device() {
-    local device="$1"
-    if [[ ! "$device" =~ ^/dev/tty[A-Za-z]+[0-9]*$ ]]; then
-        return 1
-    fi
-    if [[ "$device" =~ [!\"\'\`\$\(\)\{\}\[\]\|\;\&\<\>] ]]; then
-        return 1
-    fi
-    return 0
-}
-
-validate_baud() {
-    local baud="$1"
-    if [[ ! "$baud" =~ ^[0-9]+$ ]]; then
-        return 1
-    fi
-    for valid_baud in "${VALID_BAUDS[@]}"; do
-        [[ "$baud" == "$valid_baud" ]] && return 0
-    done
-    return 1
-}
-
-validate_log_dir() {
-    local log_dir="$1"
-    if [[ ! "$log_dir" =~ ^/ ]] || [[ "$log_dir" =~ \.\. ]]; then
-        return 1
-    fi
-    if [[ ! "$log_dir" =~ ^/[a-zA-Z0-9/_-]+$ ]]; then
-        return 1
-    fi
-    local canonical_dir
-    canonical_dir=$(realpath -m "$log_dir")
-    [[ "$canonical_dir" =~ ^/var/log/ ]] && return 0
-    return 1
-}
 
 # Wait for device to be ready
 wait_for_device() {

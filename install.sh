@@ -26,6 +26,7 @@ echo "Installing ulog..."
 install -Dm755 src/ulog.sh /usr/bin/ulog
 install -Dm755 src/ulog-genconfig /usr/bin/ulog-genconfig
 install -Dm755 src/ulog-export /usr/bin/ulog-export
+install -Dm644 src/ulog-common.sh /usr/lib/ulog/ulog-common.sh
 
 # Config file: root owns, ulog group can read (0640)
 install -Dm640 -o root -g ulog src/ulog.conf /etc/ulog.conf
