@@ -113,13 +113,6 @@ get_session_id() {
     fi
 }
 
-# Clear session (called on disconnect)
-clear_session() {
-    local dev_name="$1"
-    local session_file="$STATE_DIR/${dev_name}.session"
-    rm -f "$session_file"
-}
-
 # Store log directory for a device (for cleanup)
 store_log_dir() {
     local dev_name="$1"
