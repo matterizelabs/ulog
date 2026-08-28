@@ -1,13 +1,10 @@
 #!/bin/bash
-# ulog-genconfig - regenerate udev rules and systemd service from config
-# Supports multiple devices via /etc/ulog.d/*.conf
 
 set -euo pipefail
 
 readonly CONFIG_FILE="/etc/ulog.conf"
 readonly CONFIG_DIR="/etc/ulog.d"
 
-# Load shared helpers (parse_config, validate_*, format_identity)
 _ulog_common="/usr/lib/ulog/ulog-common.sh"
 [[ -f "$_ulog_common" ]] || _ulog_common="$(dirname "${BASH_SOURCE[0]}")/ulog-common.sh"
 # shellcheck source=/dev/null
@@ -33,12 +30,10 @@ main() {
         exit 1
     fi
 
-    # Collect all devices and log directories
     declare -a devices=()
     declare -a dev_names=()
     declare -a log_dirs=()
 
-    # Process device configs from /etc/ulog.d/
     if [[ -d "$CONFIG_DIR" ]]; then
         for config in "$CONFIG_DIR"/*.conf; do
             [[ -f "$config" ]] || continue
@@ -71,7 +66,6 @@ main() {
                 continue
             fi
 
-            # Default log_dir
             if [[ -z "$log_dir" ]]; then
                 log_dir="/var/log/ulog/$dev_name"
             fi
@@ -89,7 +83,6 @@ main() {
         done
     fi
 
-    # Fallback: use main config if no device configs
     if [[ ${#devices[@]} -eq 0 ]] && [[ -f "$CONFIG_FILE" ]]; then
         parse_config "$CONFIG_FILE"
 
@@ -118,15 +111,12 @@ main() {
         exit 1
     fi
 
-    # Build ReadWritePaths and DeviceAllow for systemd
-    # Use base log directory so subdirs can be created dynamically
     local read_write_paths="/var/lib/ulog /var/log/ulog"
     local device_allow=""
     for i in "${!devices[@]}"; do
         device_allow+="DeviceAllow=${devices[$i]} rw\n"
     done
 
-    # Detect available serial port groups (Arch: uucp, Debian: dialout)
     local serial_groups=""
     for group in uucp dialout tty; do
         if getent group "$group" &>/dev/null; then
@@ -134,10 +124,9 @@ main() {
             serial_groups+="$group"
         fi
     done
-    [[ -z "$serial_groups" ]] && serial_groups="dialout"  # fallback
+    [[ -z "$serial_groups" ]] && serial_groups="dialout"
     log_info "Serial port groups: $serial_groups"
 
-    # Generate systemd service
     local service_content
     read -r -d '' service_content << EOF || true
 [Unit]
@@ -191,23 +180,19 @@ EOF
     atomic_write "/usr/lib/systemd/system/ulog.service" "$service_content"
     log_info "Generated: /usr/lib/systemd/system/ulog.service"
 
-    # Generate udev rules for all devices
     local udev_content=""
     for dev_name in "${dev_names[@]}"; do
-        # Set device permissions and trigger service start
         udev_content+="ACTION==\"add\", KERNEL==\"${dev_name}\", GROUP=\"ulog\", MODE=\"0660\", TAG+=\"systemd\", ENV{SYSTEMD_WANTS}=\"ulog.service\"\n"
     done
 
     atomic_write "/etc/udev/rules.d/99-ulog.rules" "$(echo -e "$udev_content")"
     log_info "Generated: /etc/udev/rules.d/99-ulog.rules"
 
-    # Create state directory for session tracking
     mkdir -p /var/lib/ulog/sessions
     chown ulog:ulog /var/lib/ulog /var/lib/ulog/sessions
     chmod 0750 /var/lib/ulog /var/lib/ulog/sessions
     log_info "Created: /var/lib/ulog/sessions"
 
-    # Create log directories
     for log_dir in "${log_dirs[@]}"; do
         mkdir -p "$log_dir"
         chown ulog:ulog "$log_dir"
@@ -215,7 +200,6 @@ EOF
         log_info "Created: $log_dir"
     done
 
-    # Reload
     udevadm control --reload-rules
     systemctl daemon-reload
 

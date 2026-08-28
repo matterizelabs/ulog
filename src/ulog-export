@@ -1,5 +1,4 @@
 #!/bin/bash
-# ulog-export - Export and manage ulog sessions
 set -euo pipefail
 
 readonly LOG_BASE="/var/log/ulog"
@@ -54,14 +53,11 @@ EOF
 log_error() { echo "ulog-export: ERROR: $*" >&2; }
 log_info() { echo "ulog-export: $*" >&2; }
 
-# Load shared helpers (format_identity, etc.)
 _ulog_common="/usr/lib/ulog/ulog-common.sh"
 [[ -f "$_ulog_common" ]] || _ulog_common="$(dirname "${BASH_SOURCE[0]}")/ulog-common.sh"
 # shellcheck source=/dev/null
 source "$_ulog_common"
 
-# Parse session.index file and output session info
-# Format: session_id|start_time|end_time|identity|files
 list_sessions() {
     local device="$1"
     local index_file="$LOG_BASE/$device/session.index"
@@ -81,7 +77,6 @@ list_sessions() {
         file_count=$(echo "$files" | tr ',' '\n' | wc -l)
         display_identity=$(format_identity "$identity")
 
-        # Format timestamps for display (remove timezone)
         local display_start display_end
         display_start="${start_time%+*}"
         display_start="${display_start/T/ }"
@@ -96,7 +91,6 @@ list_sessions() {
     done < "$index_file"
 }
 
-# List sessions from all devices
 list_all_sessions() {
     local found_any=false
 
@@ -122,7 +116,6 @@ list_all_sessions() {
     fi
 }
 
-# Get session info from index
 get_session_info() {
     local device="$1"
     local session_id="$2"
@@ -135,7 +128,6 @@ get_session_info() {
     grep "^${session_id}|" "$index_file" 2>/dev/null || return 1
 }
 
-# Get latest session ID for a device
 get_latest_session() {
     local device="$1"
     local index_file="$LOG_BASE/$device/session.index"
@@ -144,11 +136,9 @@ get_latest_session() {
         return 1
     fi
 
-    # Get the last non-comment line
     grep -v '^#' "$index_file" | tail -1 | cut -d'|' -f1
 }
 
-# Find sessions by vendor/product/serial filter
 find_sessions_by_filter() {
     local vendor_filter="$1"
     local product_filter="$2"
@@ -166,11 +156,9 @@ find_sessions_by_filter() {
         while IFS='|' read -r session_id start_time end_time sess_identity files || [[ -n "$session_id" ]]; do
             [[ -z "$session_id" || "$session_id" =~ ^# ]] && continue
 
-            # Parse identity: vendor:product:serial
             local sess_vendor sess_product sess_serial
             IFS=':' read -r sess_vendor sess_product sess_serial <<< "$sess_identity"
 
-            # Match against filters
             local match=true
             if [[ -n "$vendor_filter" && "$sess_vendor" != "$vendor_filter" ]]; then
                 match=false
@@ -178,7 +166,6 @@ find_sessions_by_filter() {
             if [[ -n "$product_filter" && "$sess_product" != "$product_filter" ]]; then
                 match=false
             fi
-            # Serial uses prefix match (user can provide truncated serial)
             if [[ -n "$serial_filter" && "$sess_serial" != "$serial_filter"* ]]; then
                 match=false
             fi
@@ -196,7 +183,6 @@ find_sessions_by_filter() {
     printf '%s\n' "${found_sessions[@]}"
 }
 
-# Calculate duration between two timestamps
 calc_duration() {
     local start="$1"
     local end="$2"
@@ -222,7 +208,6 @@ calc_duration() {
     printf "%dh %dm %ds" "$hours" "$mins" "$secs"
 }
 
-# Export session(s) to output
 export_sessions() {
     local device="$1"
     local session_ids="$2"
@@ -231,7 +216,6 @@ export_sessions() {
 
     local log_dir="$LOG_BASE/$device"
 
-    # Handle multiple session IDs
     IFS=',' read -ra sessions <<< "$session_ids"
 
     local all_files=()
@@ -271,11 +255,9 @@ export_sessions() {
         done
     done
 
-    # Determine output destination
     local out_target="/dev/stdout"
     [[ -n "$output" ]] && out_target="$output"
 
-    # Write header unless disabled
     if [[ "$no_header" != "true" ]]; then
         local duration
         duration=$(calc_duration "$first_start" "$last_end")
@@ -295,7 +277,6 @@ Files:         $total_files
 
 EOF
     else
-        # Truncate/create file if no header
         [[ -n "$output" ]] && : > "$out_target"
     fi
 
@@ -312,7 +293,6 @@ EOF
     fi
 }
 
-# Export by vendor/product/serial filter
 export_by_filter() {
     local vendor_filter="$1"
     local product_filter="$2"
@@ -331,7 +311,6 @@ export_by_filter() {
         return 1
     fi
 
-    # Group sessions by device
     declare -A device_sessions
     while IFS=':' read -r device session_id; do
         if [[ -n "${device_sessions[$device]:-}" ]]; then
@@ -341,14 +320,11 @@ export_by_filter() {
         fi
     done <<< "$sessions"
 
-    # Determine output destination
     local out_target="/dev/stdout"
     [[ -n "$output" ]] && out_target="$output"
 
-    # Truncate/create file
     [[ -n "$output" ]] && : > "$out_target"
 
-    # Export from each device
     local first=true
     for device in "${!device_sessions[@]}"; do
         if [[ "$first" != "true" ]]; then
@@ -356,7 +332,6 @@ export_by_filter() {
         fi
         first=false
 
-        # Export with a sub-header for this device
         if [[ "$no_header" != "true" ]]; then
             echo "### Device: $device ###" >> "$out_target"
         fi
@@ -447,7 +422,6 @@ main() {
         esac
     done
 
-    # List mode
     if [[ "$list_mode" == "true" ]]; then
         if [[ "$all_devices" == "true" ]]; then
             list_all_sessions
@@ -460,13 +434,11 @@ main() {
         return
     fi
 
-    # Export by vendor/product/serial filter
     if [[ -n "$vendor" || -n "$product" || -n "$serial" ]]; then
         export_by_filter "$vendor" "$product" "$serial" "$output" "$no_header"
         return
     fi
 
-    # Export specific session(s)
     if [[ -n "$session_id" ]]; then
         if [[ -z "$device" ]]; then
             log_error "--session requires --device"
@@ -476,7 +448,6 @@ main() {
         return
     fi
 
-    # Export latest session for device
     if [[ -n "$device" ]]; then
         local latest
         latest=$(get_latest_session "$device")
@@ -489,7 +460,6 @@ main() {
         return
     fi
 
-    # No valid operation specified
     log_error "No operation specified"
     usage 1
 }

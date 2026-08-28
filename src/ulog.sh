@@ -1,29 +1,23 @@
 #!/bin/bash
-# ulog - USB serial logger (multi-device support)
 set -uo pipefail
 
 readonly CONFIG_FILE="/etc/ulog.conf"
 readonly CONFIG_DIR="/etc/ulog.d"
 readonly STATE_DIR="/var/lib/ulog/sessions"
 
-# Load shared helpers (parse_config, validate_*, format_identity)
 _ulog_common="/usr/lib/ulog/ulog-common.sh"
 [[ -f "$_ulog_common" ]] || _ulog_common="$(dirname "${BASH_SOURCE[0]}")/ulog-common.sh"
 # shellcheck source=/dev/null
 source "$_ulog_common"
 
-# Track child PIDs and their device params for cleanup/restarts
 declare -a CHILD_PIDS=()
 declare -a DEV_NAMES=() DEVICES=() BAUDS=() LOG_DIRS=()
 
-# Logging functions
 log_error() { echo "ulog: ERROR: $*" >&2; }
 log_info() { echo "ulog: $*"; }
 log_device() { echo "ulog[$1]: $2"; }
 log_device_error() { echo "ulog[$1]: ERROR: $2" >&2; }
 
-# Get USB device identity from sysfs (vendor_id:product_id:serial)
-# Returns "unknown" components if not available
 get_device_identity() {
     local device="$1"
     local dev_name
@@ -33,13 +27,11 @@ get_device_identity() {
     local product_id="unknown"
     local serial="unknown"
 
-    # Resolve symlink to get real path, then search up for USB attributes
     local tty_device="/sys/class/tty/$dev_name/device"
     if [[ -e "$tty_device" ]]; then
         local search_path
         search_path=$(readlink -f "$tty_device")
 
-        # Walk up the directory tree looking for idVendor
         while [[ "$search_path" != "/" && "$search_path" != "/sys/devices" ]]; do
             if [[ -f "$search_path/idVendor" ]]; then
                 vendor_id=$(cat "$search_path/idVendor" 2>/dev/null | tr -d '[:space:]')
@@ -57,28 +49,25 @@ get_device_identity() {
     echo "${vendor_id}:${product_id}:${serial}"
 }
 
-# Check if device identity has changed
-# Returns 0 if changed (or new device), 1 if same
 device_identity_changed() {
     local dev_name="$1"
     local current_identity="$2"
     local identity_file="$STATE_DIR/${dev_name}.identity"
 
     if [[ ! -f "$identity_file" ]]; then
-        return 0  # No previous identity, treat as new/changed
+        return 0
     fi
 
     local stored_identity
     stored_identity=$(cat "$identity_file" 2>/dev/null || echo "")
 
     if [[ "$current_identity" != "$stored_identity" ]]; then
-        return 0  # Identity changed
+        return 0
     fi
 
-    return 1  # Same device
+    return 1
 }
 
-# Store device identity
 store_device_identity() {
     local dev_name="$1"
     local identity="$2"
@@ -89,14 +78,12 @@ store_device_identity() {
 }
 
 
-# Generate a new session ID (short format: MMDD-HHMM-xxxx)
 generate_session_id() {
     local rand
     rand=$(od -An -N2 -tx1 /dev/urandom | tr -d '[:space:]')
     echo "$(date +%m%d-%H%M)-${rand}"
 }
 
-# Get current session ID for a device, or generate new one
 get_session_id() {
     local dev_name="$1"
     local force_new="${2:-false}"
@@ -113,7 +100,6 @@ get_session_id() {
     fi
 }
 
-# Store log directory for a device (for cleanup)
 store_log_dir() {
     local dev_name="$1"
     local log_dir="$2"
@@ -190,7 +176,6 @@ update_session_index() {
     chmod 0640 "$index_file"
 }
 
-# Write session header to log file
 write_session_header() {
     local log_file="$1"
     local session_id="$2"
@@ -222,7 +207,6 @@ wait_for_device() {
     done
 }
 
-# Create log file safely
 create_log_file() {
     local log_dir="$1"
     local today="$2"
@@ -243,7 +227,6 @@ create_log_file() {
     echo "$logfile"
 }
 
-# Log a single device (runs as child process)
 log_device_worker() {
     local name="$1"
     local device="$2"
@@ -252,7 +235,6 @@ log_device_worker() {
 
     log_device "$name" "Starting logger for $device at $baud baud"
 
-    # Validate
     if ! validate_device "$device"; then
         log_device_error "$name" "Invalid device: $device"
         return 1
@@ -266,14 +248,12 @@ log_device_worker() {
         return 1
     fi
 
-    # Wait for device
     log_device "$name" "Waiting for device..."
     if ! wait_for_device "$device"; then
         log_device_error "$name" "Device not ready: $device"
         return 1
     fi
 
-    # Get device identity and check for changes
     local dev_name identity session_id session_start force_new_session
     dev_name=$(basename "$device")
     identity=$(get_device_identity "$device")
@@ -294,11 +274,9 @@ log_device_worker() {
         force_new_session="true"
     fi
 
-    # Get or create session ID
     session_id=$(get_session_id "$dev_name" "$force_new_session")
     log_device "$name" "Session ID: $session_id"
 
-    # Create log file
     local today logfile
     today=$(date +%Y-%m-%d)
     logfile=$(create_log_file "$log_dir" "$today")
@@ -307,10 +285,8 @@ log_device_worker() {
         return 1
     fi
 
-    # Write session header to log file
     write_session_header "$logfile" "$session_id" "$session_start" "$device" "$identity"
 
-    # Update session index and store log dir for cleanup
     update_session_index "$log_dir" "$session_id" "$session_start" "$identity" "$logfile"
     store_log_dir "$dev_name" "$log_dir"
 
@@ -341,7 +317,6 @@ launch_worker() {
     log_info "Started logger for $device (PID: $pid)"
 }
 
-# Cleanup handler
 cleanup() {
     log_info "Shutting down..."
     for pid in "${CHILD_PIDS[@]}"; do
@@ -351,7 +326,6 @@ cleanup() {
     done
     wait
 
-    # End all active sessions
     for session_file in "$STATE_DIR"/*.session; do
         [[ -f "$session_file" ]] || continue
         local dev_name
@@ -364,11 +338,9 @@ cleanup() {
     exit 0
 }
 
-# Main
 main() {
     trap cleanup SIGTERM SIGINT SIGHUP
 
-    # Load global defaults
     local default_baud="115200"
 
     if [[ -f "$CONFIG_FILE" ]]; then
@@ -378,7 +350,6 @@ main() {
 
     local device_count=0
 
-    # Process device configs from /etc/ulog.d/
     if [[ -d "$CONFIG_DIR" ]]; then
         for config in "$CONFIG_DIR"/*.conf; do
             [[ -f "$config" ]] || continue
@@ -394,7 +365,6 @@ main() {
                 continue
             fi
 
-            # Default log_dir based on device name
             if [[ -z "$log_dir" ]]; then
                 local dev_name
                 dev_name=$(basename "$device")
@@ -409,7 +379,6 @@ main() {
         done
     fi
 
-    # Fallback: if no device configs, use main config (backwards compatible)
     if [[ $device_count -eq 0 ]]; then
         if [[ -f "$CONFIG_FILE" ]]; then
             parse_config "$CONFIG_FILE" || true
