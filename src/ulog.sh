@@ -14,6 +14,7 @@ source "$_ulog_common"
 
 # Track child PIDs for cleanup
 declare -a CHILD_PIDS=()
+declare -a DEV_NAMES=() DEVICES=() BAUDS=() LOG_DIRS=()
 
 # Logging functions
 log_error() { echo "ulog: ERROR: $*" >&2; }
@@ -353,6 +354,20 @@ log_device_worker() {
     return $rc
 }
 
+# Launch a device worker and record its params so a dead worker can be
+# restarted independently without affecting other devices.
+launch_worker() {
+    local name="$1" device="$2" baud="$3" log_dir="$4"
+    log_device_worker "$name" "$device" "$baud" "$log_dir" &
+    local pid=$!
+    CHILD_PIDS+=("$pid")
+    DEV_NAMES+=("$name")
+    DEVICES+=("$device")
+    BAUDS+=("$baud")
+    LOG_DIRS+=("$log_dir")
+    log_info "Started logger for $device (PID: $pid)"
+}
+
 # Cleanup handler
 cleanup() {
     log_info "Shutting down..."
@@ -416,11 +431,8 @@ main() {
             local name
             name=$(basename "$config" .conf)
 
-            log_device_worker "$name" "$device" "$baud" "$log_dir" &
-            CHILD_PIDS+=($!)
+            launch_worker "$name" "$device" "$baud" "$log_dir"
             ((device_count++))
-
-            log_info "Started logger for $device (PID: ${CHILD_PIDS[-1]})"
         done
     fi
 
@@ -436,11 +448,8 @@ main() {
             if [[ -n "$device" ]]; then
                 [[ -z "$log_dir" ]] && log_dir="/var/log/ulog/$(basename "$device")"
 
-                log_device_worker "default" "$device" "$baud" "$log_dir" &
-                CHILD_PIDS+=($!)
+                launch_worker "default" "$device" "$baud" "$log_dir"
                 ((device_count++))
-
-                log_info "Started logger for $device (PID: ${CHILD_PIDS[-1]})"
             fi
         fi
     fi
@@ -452,14 +461,16 @@ main() {
 
     log_info "Started $device_count device logger(s)"
 
-    # Wait for any child to exit, then restart it
+    # Monitor workers. A dead worker is restarted on its own so one device
+    # failing or being unplugged never stops logging for the others.
     while true; do
         for i in "${!CHILD_PIDS[@]}"; do
             pid="${CHILD_PIDS[$i]}"
             if ! kill -0 "$pid" 2>/dev/null; then
-                log_info "Logger (PID: $pid) exited, will be restarted by systemd"
-                # Let systemd handle restart
-                exit 1
+                log_info "Logger for ${DEVICES[$i]} exited, restarting"
+                log_device_worker "${DEV_NAMES[$i]}" "${DEVICES[$i]}" \
+                    "${BAUDS[$i]}" "${LOG_DIRS[$i]}" &
+                CHILD_PIDS[$i]=$!
             fi
         done
         sleep 5
