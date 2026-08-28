@@ -48,7 +48,7 @@ ulog is designed for logging serial data from USB devices in trusted environment
 All configuration values are strictly validated:
 
 - **DEVICE**: Must match `^/dev/tty[A-Za-z]+[0-9]*$`
-- **BAUD**: Must be numeric and in whitelist (300-921600)
+- **BAUD**: Must be numeric, 1-4000000
 - **LOG_DIR**: Must be under `/var/log/`, no path traversal
 
 ### Privilege Separation
@@ -68,16 +68,18 @@ NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
+ReadWritePaths=/var/lib/ulog /var/log/ulog
+ReadOnlyPaths=/etc/ulog.conf /etc/ulog.d
 CapabilityBoundingSet=
 PrivateDevices=no
-DeviceAllow=/dev/ttyUSB0 rw
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectKernelLogs=yes
 ProtectControlGroups=yes
-MemoryDenyWriteExecute=yes
-RestrictAddressFamilies=AF_UNIX
+RestrictRealtime=yes
 LockPersonality=yes
+RestrictSUIDSGID=yes
+RemoveIPC=yes
 ```
 
 ### Safe Configuration Parsing
@@ -86,7 +88,7 @@ Configuration files are parsed safely without shell execution:
 
 - No `source` or `eval` of config files
 - Key-value parsing with strict validation
-- Unknown keys are rejected
+- Unknown keys are ignored
 
 ### File System Protection
 

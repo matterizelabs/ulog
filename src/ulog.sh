@@ -1,8 +1,9 @@
 #!/bin/bash
 set -uo pipefail
 
-readonly CONFIG_FILE="/etc/ulog.conf"
-readonly CONFIG_DIR="/etc/ulog.d"
+readonly ULOG_ETC_DIR="${ULOG_ETC_DIR:-/etc}"
+readonly CONFIG_FILE="$ULOG_ETC_DIR/ulog.conf"
+readonly CONFIG_DIR="$ULOG_ETC_DIR/ulog.d"
 readonly STATE_DIR="/var/lib/ulog/sessions"
 
 _ulog_common="/usr/lib/ulog/ulog-common.sh"
@@ -36,9 +37,9 @@ get_device_identity() {
 
         while [[ "$search_path" != "/" && "$search_path" != "/sys/devices" ]]; do
             if [[ -f "$search_path/idVendor" ]]; then
-                vendor_id=$(cat "$search_path/idVendor" 2>/dev/null | tr -d '[:space:]')
-                product_id=$(cat "$search_path/idProduct" 2>/dev/null | tr -d '[:space:]')
-                serial=$(cat "$search_path/serial" 2>/dev/null | tr -d '[:space:]')
+                vendor_id=$(cat "$search_path/idVendor" 2>/dev/null | tr -d '[:space:][:cntrl:]:')
+                product_id=$(cat "$search_path/idProduct" 2>/dev/null | tr -d '[:space:][:cntrl:]:')
+                serial=$(cat "$search_path/serial" 2>/dev/null | tr -d '[:space:][:cntrl:]:')
                 [[ -z "$vendor_id" ]] && vendor_id="unknown"
                 [[ -z "$product_id" ]] && product_id="unknown"
                 [[ -z "$serial" ]] && serial="unknown"
@@ -82,7 +83,7 @@ store_device_identity() {
 
 generate_session_id() {
     local rand
-    rand=$(od -An -N2 -tx1 /dev/urandom | tr -d '[:space:]')
+    rand=$(od -An -N4 -tx1 /dev/urandom | tr -d '[:space:]')
     echo "$(date +%m%d-%H%M)-${rand}"
 }
 
@@ -264,7 +265,7 @@ log_device_worker() {
     key=$(identity_slug "$identity" "$dev_name")
     final_log_dir="$log_dir"
     if [[ -z "$final_log_dir" ]]; then
-        final_log_dir="/var/log/ulog/$key"
+        final_log_dir="/var/log/ulog/$dev_name"
     fi
     if ! validate_log_dir "$final_log_dir"; then
         log_device_error "$name" "Invalid log directory: $final_log_dir"
@@ -381,6 +382,19 @@ main() {
             local name
             name=$(basename "$config" .conf)
 
+            if ! validate_device "$device"; then
+                log_error "Invalid DEVICE in $config: $device"
+                continue
+            fi
+            if ! validate_baud "$baud"; then
+                log_error "Invalid BAUD in $config: $baud"
+                continue
+            fi
+            if [[ -n "$log_dir" ]] && ! validate_log_dir "$log_dir"; then
+                log_error "Invalid LOG_DIR in $config: $log_dir"
+                continue
+            fi
+
             launch_worker "$name" "$device" "$baud" "$log_dir"
             ((device_count++))
         done
@@ -395,8 +409,16 @@ main() {
             local log_dir="$PARSED_LOG_DIR"
 
             if [[ -n "$device" ]]; then
-                launch_worker "default" "$device" "$baud" "$log_dir"
-                ((device_count++))
+                if ! validate_device "$device"; then
+                    log_error "Invalid DEVICE in $CONFIG_FILE: $device"
+                elif ! validate_baud "$baud"; then
+                    log_error "Invalid BAUD in $CONFIG_FILE: $baud"
+                elif [[ -n "$log_dir" ]] && ! validate_log_dir "$log_dir"; then
+                    log_error "Invalid LOG_DIR in $CONFIG_FILE: $log_dir"
+                else
+                    launch_worker "default" "$device" "$baud" "$log_dir"
+                    ((device_count++))
+                fi
             fi
         fi
     fi

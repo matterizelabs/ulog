@@ -73,7 +73,7 @@ install -dm750 -o ulog -g ulog /var/lib/ulog
 install -dm750 -o ulog -g ulog /var/lib/ulog/sessions
 
 info "Generating systemd service and udev rules..."
-"$ULOG_BIN_DIR/ulog-genconfig"
+ULOG_ETC_DIR="$ULOG_ETC_DIR" "$ULOG_BIN_DIR/ulog-genconfig"
 
 systemctl daemon-reload
 udevadm control --reload-rules

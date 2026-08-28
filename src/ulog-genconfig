@@ -2,8 +2,9 @@
 
 set -euo pipefail
 
-readonly CONFIG_FILE="/etc/ulog.conf"
-readonly CONFIG_DIR="/etc/ulog.d"
+readonly ULOG_ETC_DIR="${ULOG_ETC_DIR:-/etc}"
+readonly CONFIG_FILE="$ULOG_ETC_DIR/ulog.conf"
+readonly CONFIG_DIR="$ULOG_ETC_DIR/ulog.d"
 
 _ulog_common="/usr/lib/ulog/ulog-common.sh"
 [[ -f "$_ulog_common" ]] || _ulog_common="$(dirname "${BASH_SOURCE[0]}")/ulog-common.sh"
@@ -131,6 +132,7 @@ Type=simple
 ExecStart=/usr/bin/ulog
 Restart=on-failure
 RestartSec=5
+Environment=ULOG_ETC_DIR=${ULOG_ETC_DIR}
 
 # Security hardening
 User=ulog
@@ -142,7 +144,7 @@ ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
 ReadWritePaths=${read_write_paths}
-ReadOnlyPaths=/etc/ulog.conf /etc/ulog.d
+ReadOnlyPaths=${ULOG_ETC_DIR}/ulog.conf ${ULOG_ETC_DIR}/ulog.d
 
 # Capability restrictions
 CapabilityBoundingSet=

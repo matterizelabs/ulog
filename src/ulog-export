@@ -20,7 +20,7 @@ Options:
   --no-header               Omit export header in output
   --all                     List sessions from all devices
 
-Session IDs use format: MMDD-HHMM-xxxx (e.g., 0120-1830-a1b2)
+Session IDs use format: MMDD-HHMM-xxxxxxxx (e.g., 0120-1830-a1b2c3d4)
 
 Examples:
   # List all sessions for a device
@@ -74,7 +74,11 @@ list_sessions() {
         [[ -z "$session_id" || "$session_id" =~ ^# ]] && continue
 
         local file_count display_identity
-        file_count=$(echo "$files" | tr ',' '\n' | wc -l)
+        if [[ -z "$files" ]]; then
+            file_count=0
+        else
+            file_count=$(echo "$files" | tr ',' '\n' | wc -l)
+        fi
         display_identity=$(format_identity "$identity")
 
         local display_start display_end
@@ -226,7 +230,7 @@ export_sessions() {
 
     for session_id in "${sessions[@]}"; do
         local session_info
-        session_info=$(get_session_info "$device" "$session_id")
+        session_info=$(get_session_info "$device" "$session_id" || true)
         if [[ -z "$session_info" ]]; then
             log_error "Session not found: $session_id"
             return 1
@@ -301,7 +305,7 @@ export_by_filter() {
     local no_header="$5"
 
     local sessions
-    sessions=$(find_sessions_by_filter "$vendor_filter" "$product_filter" "$serial_filter")
+    sessions=$(find_sessions_by_filter "$vendor_filter" "$product_filter" "$serial_filter" || true)
     if [[ -z "$sessions" ]]; then
         local filter_desc=""
         [[ -n "$vendor_filter" ]] && filter_desc="vendor=$vendor_filter"
@@ -342,7 +346,7 @@ export_by_filter() {
         IFS=',' read -ra sess_array <<< "$session_ids"
         for session_id in "${sess_array[@]}"; do
             local session_info
-            session_info=$(get_session_info "$device" "$session_id")
+            session_info=$(get_session_info "$device" "$session_id" || true)
             [[ -z "$session_info" ]] && continue
 
             local files
@@ -422,6 +426,21 @@ main() {
         esac
     done
 
+    if [[ -n "$device" ]] && [[ ! "$device" =~ ^[A-Za-z0-9._-]+$ || "$device" == "." || "$device" == ".." ]]; then
+        log_error "Invalid device name: $device"
+        usage 1
+    fi
+
+    if [[ -n "$session_id" ]]; then
+        IFS=',' read -ra sid_list <<< "$session_id"
+        for sid in "${sid_list[@]}"; do
+            if [[ ! "$sid" =~ ^[0-9]{4}-[0-9]{4}-[0-9a-f]{4,8}$ ]]; then
+                log_error "Invalid session ID: $sid"
+                usage 1
+            fi
+        done
+    fi
+
     if [[ "$list_mode" == "true" ]]; then
         if [[ "$all_devices" == "true" ]]; then
             list_all_sessions
@@ -450,7 +469,7 @@ main() {
 
     if [[ -n "$device" ]]; then
         local latest
-        latest=$(get_latest_session "$device")
+        latest=$(get_latest_session "$device" || true)
         if [[ -z "$latest" ]]; then
             log_error "No sessions found for $device"
             return 1

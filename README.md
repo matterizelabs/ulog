@@ -6,7 +6,7 @@ USB serial port logger with automatic session management for Linux.
 
 - Logs serial data from USB devices with syslog-style timestamps
 - **Multi-device support** - single service handles multiple USB devices
-- **Session tracking** - each session gets a unique ID (format: `MMDD-HHMM-xxxx`)
+- **Session tracking** - each session gets a unique ID (format: `MMDD-HHMM-xxxxxxxx`)
 - **USB device identity** - tracks vendor:product:serial to detect device swaps
 - **Export tool** - list and export sessions by device, session ID, or USB identity
 - Automatic daily log rotation (new folder per day)
@@ -110,7 +110,7 @@ journalctl -u ulog.service -f
 
 ## Session Management
 
-Each logging session is assigned a unique ID in the format `MMDD-HHMM-xxxx` (e.g., `0120-1830-a1b2`). Sessions are tracked in a `session.index` file per device with start/end times and USB device identity.
+Each logging session is assigned a unique ID in the format `MMDD-HHMM-xxxxxxxx` (e.g., `0120-1830-a1b2c3d4`). Sessions are tracked in a `session.index` file per device with start/end times and USB device identity.
 
 ### USB Device Identity
 
@@ -213,10 +213,10 @@ Jan 18 14:30:01 sensor reading: 43.1
 | Key | Description | Default |
 |-----|-------------|---------|
 | `DEVICE` | Serial device path | `/dev/ttyUSB0` |
-| `BAUD` | Baud rate (300-921600) | `115200` |
+| `BAUD` | Baud rate (positive integer, up to 4000000) | `115200` |
 | `LOG_DIR` | Log directory (must be under /var/log/) | `/var/log/ulog/<device>` |
 
-Valid baud rates: 300, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600
+Valid baud rate: any positive integer up to 4000000 (socat rejects unsupported rates)
 
 ## Project Structure
 

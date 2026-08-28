@@ -1,5 +1,5 @@
 #!/bin/bash
-readonly VALID_BAUDS=(300 1200 2400 4800 9600 19200 38400 57600 115200 230400 460800 921600)
+readonly BAUD_MIN=1 BAUD_MAX=4000000
 
 parse_config() {
     local config_file="$1"
@@ -29,8 +29,8 @@ parse_config() {
 
     while IFS='=' read -r key value || [[ -n "$key" ]]; do
         [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
-        key=$(echo "$key" | xargs)
-        value=$(echo "$value" | xargs)
+        key=$(printf '%s' "$key" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+        value=$(printf '%s' "$value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
 
         case "$key" in
             DEVICE)  PARSED_DEVICE="$value" ;;
@@ -57,17 +57,14 @@ validate_dev_name() {
 validate_baud() {
     local baud="$1"
     [[ "$baud" =~ ^[0-9]+$ ]] || return 1
-    for valid_baud in "${VALID_BAUDS[@]}"; do
-        [[ "$baud" == "$valid_baud" ]] && return 0
-    done
-    return 1
+    (( baud >= BAUD_MIN && baud <= BAUD_MAX )) || return 1
 }
 
 validate_log_dir() {
     local log_dir="$1"
     [[ "$log_dir" =~ ^/ ]] || return 1
     [[ ! "$log_dir" =~ \.\. ]] || return 1
-    [[ "$log_dir" =~ ^/[a-zA-Z0-9/_-]+$ ]] || return 1
+    [[ "$log_dir" =~ ^/[a-zA-Z0-9/_.-]+$ ]] || return 1
     local canonical_dir
     canonical_dir=$(realpath -m "$log_dir")
     [[ "$canonical_dir" =~ ^/var/log/ ]] && return 0
@@ -94,7 +91,11 @@ identity_slug() {
         return
     fi
     local slug="${vendor}-${product}"
-    [[ -n "$serial" && "$serial" != "unknown" ]] && slug="${slug}-${serial}"
+    if [[ -n "$serial" && "$serial" != "unknown" ]]; then
+        slug="${slug}-${serial}"
+    else
+        slug="${slug}-${fallback}"
+    fi
     slug=$(echo "$slug" | tr -c 'A-Za-z0-9._-' '_' | tr -s '_' | sed 's/^_//;s/_$//')
     echo "$slug"
 }
