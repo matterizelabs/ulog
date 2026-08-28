@@ -59,6 +59,11 @@ main() {
                 continue
             fi
 
+            if [[ -n "$baud" ]] && ! validate_baud "$baud"; then
+                log_error "Invalid baud rate in $config: $baud"
+                continue
+            fi
+
             local dev_name
             dev_name=$(basename "$device")
             if ! validate_dev_name "$dev_name"; then
