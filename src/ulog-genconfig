@@ -112,10 +112,6 @@ main() {
     fi
 
     local read_write_paths="/var/lib/ulog /var/log/ulog"
-    local device_allow=""
-    for i in "${!devices[@]}"; do
-        device_allow+="DeviceAllow=${devices[$i]} rw\n"
-    done
 
     local serial_groups=""
     for group in uucp dialout tty; do
@@ -157,7 +153,6 @@ NoNewPrivileges=yes
 
 # Device access
 PrivateDevices=no
-$(echo -e "$device_allow")
 
 # Kernel restrictions
 ProtectKernelTunables=yes
