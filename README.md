@@ -17,50 +17,37 @@ USB serial port logger with automatic session management for Linux.
 
 ## Supported Systems
 
-Linux distributions with systemd:
+Any Linux distribution with systemd. Install from source with the bundled
+`install.sh` (run as root).
 
-| Distribution | Package |
-|--------------|---------|
-| Arch Linux / Manjaro | AUR |
-| Debian 11+ / Ubuntu 20.04+ | `.deb` |
-| Fedora / RHEL / CentOS | Manual |
-| Other systemd-based | Manual |
-
-**Requirements:** Linux kernel 4.x+, systemd, bash 4.4+
+**Requirements:** Linux kernel 4.x+, systemd, bash 4.4+, and the runtime
+dependencies listed below.
 
 **Not supported:** macOS, Windows, BSD, non-systemd Linux (OpenRC, runit, etc.)
 
 ## Installation
 
-### Arch Linux (AUR)
-
-```bash
-yay -S ulog
-```
-
-Or manually:
-
-```bash
-git clone https://github.com/matterizelabs/ulog.git
-cd ulog/packaging/arch
-makepkg -si
-```
-
-### Debian/Ubuntu
-
-Download from [releases](https://github.com/matterizelabs/ulog/releases):
-
-```bash
-sudo dpkg -i ulog_1.1.1_all.deb
-```
-
-### Manual (root-only systems)
-
 ```bash
 git clone https://github.com/matterizelabs/ulog.git
 cd ulog
-./install.sh
+sudo ./install.sh
 ```
+
+`install.sh` creates the `ulog` service user, installs the scripts under
+`/usr/bin` and `/usr/lib/ulog`, writes the default config under `/etc/ulog.d`,
+generates the systemd unit and udev rules, and enables the services.
+
+Uninstall with `sudo ./uninstall.sh` (log data in `/var/log/ulog` is left in
+place).
+
+Install-time paths can be overridden with environment variables:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `ULOG_BIN_DIR` | `/usr/bin` | Where `ulog`, `ulog-genconfig`, `ulog-export` are installed |
+| `ULOG_LIB_DIR` | `/usr/lib/ulog` | Where `ulog-common.sh` is installed |
+| `ULOG_ETC_DIR` | `/etc` | Where config and `ulog.d` live |
+| `ULOG_CHECKSUMS` | _(unset)_ | Optional `sha256sum -c` file to verify sources before installing |
 
 ## Configuration
 
@@ -239,15 +226,15 @@ ulog/
     ulog.sh               # Main logger script (multi-device)
     ulog-export           # Session export/list tool
     ulog-genconfig        # Config generator
+    ulog-common.sh        # Shared parsing/validation helpers
     ulog.conf             # Default configuration
   services/               # Systemd units
     ulog-genconfig.path   # Watch config for changes
     ulog-genconfig.service
     ulog-rollover.service
     ulog-rollover.timer
-  packaging/              # Distribution packages
-    arch/                 # Arch Linux (AUR)
-    debian/               # Debian/Ubuntu
+  install.sh              # System-wide installer (run as root)
+  uninstall.sh            # Matching uninstaller
 ```
 
 ## Security
