@@ -123,5 +123,3 @@ Configuration files are parsed safely without shell execution:
 ## Security Audit
 
 A full security audit was performed on v1.0.0, identifying 10 vulnerabilities. All critical and high severity issues have been addressed in v1.1.0.
-
-The full vulnerability report is available in `ulog-vuln.md`.
