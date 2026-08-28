@@ -336,9 +336,21 @@ log_device_worker() {
 
     log_device "$name" "Logging to $logfile"
 
-    # Start logging
-    exec socat -u "$device,b${baud},raw,echo=0,crtscts=0,clocal=1" STDOUT \
-        | ts '%b %d %H:%M:%S' >> "$logfile"
+    # Start logging. socat is supervised directly (not via exec) so it is not
+    # orphaned if this worker is terminated; ts is a child of socat and exits
+    # on EOF/SIGPIPE when socat dies.
+    socat -u "$device,b${baud},raw,echo=0,crtscts=0,clocal=1" STDOUT \
+        > >(ts '%b %d %H:%M:%S' >> "$logfile") &
+    local socat_pid=$!
+
+    trap 'kill "$socat_pid" 2>/dev/null' SIGTERM SIGINT
+
+    wait "$socat_pid"
+    local rc=$?
+
+    # Session ended (device unplugged or socat exited)
+    end_session "$dev_name"
+    return $rc
 }
 
 # Cleanup handler
