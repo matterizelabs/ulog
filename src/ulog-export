@@ -299,11 +299,9 @@ EOF
         [[ -n "$output" ]] && : > "$out_target"
     fi
 
-    # Concatenate log files, stripping header lines
     for log_file in "${all_files[@]}"; do
         if [[ -f "$log_file" ]]; then
-            # Skip lines starting with # (header lines)
-            grep -v '^#' "$log_file" 2>/dev/null >> "$out_target" || true
+            grep -vE '^#ULOG:|^# ULOG_' "$log_file" 2>/dev/null >> "$out_target" || true
         else
             log_error "Log file not found: $log_file"
         fi
@@ -379,7 +377,7 @@ export_by_filter() {
             for f in "${file_list[@]}"; do
                 local log_file="$log_dir/$f"
                 if [[ -f "$log_file" ]]; then
-                    grep -v '^#' "$log_file" 2>/dev/null >> "$out_target" || true
+                    grep -vE '^#ULOG:|^# ULOG_' "$log_file" 2>/dev/null >> "$out_target" || true
                 fi
             done
         done

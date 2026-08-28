@@ -216,13 +216,12 @@ write_session_header() {
     IFS=':' read -r vendor_id product_id serial <<< "$identity"
 
     {
-        echo "# ULOG_SESSION_ID=$session_id"
-        echo "# ULOG_SESSION_START=$session_start"
-        echo "# ULOG_DEVICE=$device"
-        echo "# ULOG_VENDOR_ID=$vendor_id"
-        echo "# ULOG_PRODUCT_ID=$product_id"
-        echo "# ULOG_SERIAL=$serial"
-        echo "#"
+        echo "#ULOG:SESSION_ID=$session_id"
+        echo "#ULOG:SESSION_START=$session_start"
+        echo "#ULOG:DEVICE=$device"
+        echo "#ULOG:VENDOR_ID=$vendor_id"
+        echo "#ULOG:PRODUCT_ID=$product_id"
+        echo "#ULOG:SERIAL=$serial"
     } >> "$log_file"
 }
 
