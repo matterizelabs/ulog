@@ -12,7 +12,7 @@ _ulog_common="/usr/lib/ulog/ulog-common.sh"
 # shellcheck source=/dev/null
 source "$_ulog_common"
 
-# Track child PIDs for cleanup
+# Track child PIDs and their device params for cleanup/restarts
 declare -a CHILD_PIDS=()
 declare -a DEV_NAMES=() DEVICES=() BAUDS=() LOG_DIRS=()
 
@@ -337,9 +337,6 @@ log_device_worker() {
 
     log_device "$name" "Logging to $logfile"
 
-    # Start logging. socat is supervised directly (not via exec) so it is not
-    # orphaned if this worker is terminated; ts is a child of socat and exits
-    # on EOF/SIGPIPE when socat dies.
     socat -u "$device,b${baud},raw,echo=0,crtscts=0,clocal=1" STDOUT \
         > >(ts '%b %d %H:%M:%S' >> "$logfile") &
     local socat_pid=$!
@@ -349,13 +346,10 @@ log_device_worker() {
     wait "$socat_pid"
     local rc=$?
 
-    # Session ended (device unplugged or socat exited)
     end_session "$dev_name"
     return $rc
 }
 
-# Launch a device worker and record its params so a dead worker can be
-# restarted independently without affecting other devices.
 launch_worker() {
     local name="$1" device="$2" baud="$3" log_dir="$4"
     log_device_worker "$name" "$device" "$baud" "$log_dir" &
@@ -461,8 +455,6 @@ main() {
 
     log_info "Started $device_count device logger(s)"
 
-    # Monitor workers. A dead worker is restarted on its own so one device
-    # failing or being unplugged never stops logging for the others.
     while true; do
         for i in "${!CHILD_PIDS[@]}"; do
             pid="${CHILD_PIDS[$i]}"

@@ -1,13 +1,6 @@
 #!/bin/bash
-# ulog-common - shared helpers for ulog scripts
-# Sourced by ulog, ulog-genconfig and ulog-export.
-# Defines parsing and validation used across all three so the logic lives
-# in exactly one place.
-
 readonly VALID_BAUDS=(300 1200 2400 4800 9600 19200 38400 57600 115200 230400 460800 921600)
 
-# Safe config parser - sets PARSED_DEVICE, PARSED_BAUD, PARSED_LOG_DIR
-# Requires log_error to be defined by the sourcing script.
 parse_config() {
     local config_file="$1"
 
@@ -81,7 +74,6 @@ validate_log_dir() {
     return 1
 }
 
-# Format identity for display (truncate serial to 8 chars)
 format_identity() {
     local identity="$1"
     local vendor product serial
