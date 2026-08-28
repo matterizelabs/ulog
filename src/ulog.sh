@@ -242,19 +242,6 @@ wait_for_device() {
     return 1
 }
 
-# Initialize serial port
-init_serial() {
-    local device="$1"
-    local baud="$2"
-
-    stty -F "$device" "$baud" raw -echo -echoe -echok -echoctl -echonl \
-         -icanon -iexten -isig -brkint -icrnl -ignbrk -igncr -inlcr \
-         -inpck -istrip -ixon -ixoff -parmrk -opost cs8 cread clocal -crtscts \
-         min 1 time 0 2>/dev/null || return 1
-    sleep 0.2
-    return 0
-}
-
 # Create log file safely
 create_log_file() {
     local log_dir="$1"
@@ -303,13 +290,6 @@ log_device_worker() {
     log_device "$name" "Waiting for device..."
     if ! wait_for_device "$device"; then
         log_device_error "$name" "Device not ready: $device"
-        return 1
-    fi
-
-    # Initialize serial port
-    log_device "$name" "Initializing serial port..."
-    if ! init_serial "$device" "$baud"; then
-        log_device_error "$name" "Failed to initialize: $device"
         return 1
     fi
 
