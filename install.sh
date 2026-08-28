@@ -5,6 +5,8 @@ ULOG_BIN_DIR="${ULOG_BIN_DIR:-/usr/bin}"
 ULOG_LIB_DIR="${ULOG_LIB_DIR:-/usr/lib/ulog}"
 ULOG_ETC_DIR="${ULOG_ETC_DIR:-/etc}"
 ULOG_CHECKSUMS="${ULOG_CHECKSUMS:-}"
+ULOG_VERSION="${ULOG_VERSION:-v1.1.3}"
+ULOG_RAW="${ULOG_RAW:-https://raw.githubusercontent.com/matterizelabs/ulog/$ULOG_VERSION}"
 
 red()    { printf '\033[0;31m%s\033[0m\n' "$*"; }
 green()  { printf '\033[0;32m%s\033[0m\n' "$*"; }
@@ -27,6 +29,18 @@ command -v systemctl &>/dev/null || die "systemd is required"
 for c in socat ts realpath; do
     command -v "$c" &>/dev/null || die "$c is required (install socat and moreutils)"
 done
+
+if [[ ! -f "$SRC_DIR/src/ulog.sh" ]]; then
+    info "Fetching ulog $ULOG_VERSION..."
+    command -v curl &>/dev/null || die "curl is required"
+    SRC_DIR="$(mktemp -d)"
+    trap 'rm -rf "$SRC_DIR"' EXIT
+    for f in src/ulog.sh src/ulog-genconfig src/ulog-export src/ulog-common.sh src/ulog.conf \
+             services/ulog-genconfig.path services/ulog-genconfig.service \
+             services/ulog-rollover.service services/ulog-rollover.timer; do
+        curl --create-dirs -fsSL "$ULOG_RAW/$f" -o "$SRC_DIR/$f" || die "failed to download $f"
+    done
+fi
 
 if [[ -n "$ULOG_CHECKSUMS" ]]; then
     sha256sum -c "$ULOG_CHECKSUMS" || die "checksum verification failed"

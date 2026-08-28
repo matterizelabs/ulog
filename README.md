@@ -27,6 +27,14 @@ dependencies listed below.
 
 ## Installation
 
+One-line install (fetches sources pinned to a release tag):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/matterizelabs/ulog/v1.1.3/install.sh | sudo bash
+```
+
+Or from a checkout:
+
 ```bash
 git clone https://github.com/matterizelabs/ulog.git
 cd ulog
